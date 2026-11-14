@@ -25,7 +25,9 @@ def parser():
         command.add_argument("--dry-run", action="store_true")
         command.add_argument("--output-dir")
         if name in ("train-representation", "train-probe", "smoke"):
-            command.add_argument("--max-steps", type=int)
+            command.add_argument(
+                "--max-steps", type=int, help="Total optimizer-step limit; overrides representation.max_steps"
+            )
         if name in ("train-representation", "train-probe"):
             command.add_argument("--resume", action="store_true")
             command.add_argument("--no-progress", action="store_true")

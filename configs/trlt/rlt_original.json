@@ -38,9 +38,10 @@
     "weight_decay": 0.0001,
     "batch_size": 32,
     "microbatch_size": 4,
-    "max_epochs": 100,
-    "patience": 10,
-    "gradient_clip": 1.0
+    "max_epochs": null,
+    "patience": null,
+    "gradient_clip": 1.0,
+    "max_steps": 15000
   },
   "probe": {
     "hidden_dim": 256,

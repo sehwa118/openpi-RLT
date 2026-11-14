@@ -111,9 +111,10 @@ class TrainConfig:
     weight_decay: float = 1e-4
     batch_size: int = 32
     microbatch_size: int = 4
-    max_epochs: int = 100
-    patience: int = 10
+    max_epochs: int | None = 100
+    patience: int | None = 10
     gradient_clip: float = 1.0
+    max_steps: int | None = None
 
 
 @dataclass(frozen=True)

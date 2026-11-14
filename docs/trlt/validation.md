@@ -59,3 +59,11 @@ one actual synthetic optimizer update with offline W&B. Stage A/B grouping and
 exclusion of aggregation counts/mask fractions were verified. Evidence and exact
 command: `experiments/trlt/tracking_groups_validation/report.md` and adjacent
 `pytest.log`/`pytest.xml`. GPU and online W&B were not run.
+
+Stage A step budget (2026-11-14): the four tracked configs now request15,000
+optimizer updates, no epoch limit and no early stopping. Stage B defaults remain
+unchanged. CPU-only stopping-policy regression results, CLI plans and exact
+commands are recorded in `experiments/trlt/stage_a_15000_validation/report.md`.
+This setting change does not launch training, migrate prior run configs or alter
+an already running process. Long GPU training and final test evaluation remain
+separate execution decisions.

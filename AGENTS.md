@@ -117,3 +117,19 @@ This is a historical handoff, not a live process-status report. Verify later art
   fractions remain local JSONL diagnostics and are excluded from W&B.
 - Existing uploaded history is preserved. See `docs/trlt/README.md` and CPU-only
   evidence in `experiments/trlt/tracking_groups_validation/`.
+
+### Experiment budget decision: 2026-11-14
+
+- User selected Stage A **15,000 total optimizer updates**, no epoch limit and
+  no early stopping, for all four architectures. The tracked `configs/trlt/`
+  files now set `representation.max_steps=15000`, `max_epochs=null`,
+  `patience=null`. Validation/best selection still occurs at epoch boundaries
+  and at the final step. Stage B keeps all existing defaults (max100epochs,
+  patience10, AdamW1e-3, batch256, hidden256×2).
+- Python `TrainConfig` retains legacy epoch defaults; use the tracked JSON files
+  for the selected experiment policy. Existing ignored `*_b32.json` run configs
+  and running processes were not modified. Do not assume an old run uses the new
+  policy, or resume it without inspecting saved config/provenance.
+- CPU-only verification evidence and execution status:
+  `experiments/trlt/stage_a_15000_validation/report.md`. This change does not
+  authorize starting additional GPU jobs or final test evaluation.

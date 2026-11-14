@@ -230,7 +230,8 @@ uv run --no-sync python scripts/trex_offline.py train-representation \
 # Full Stage A example; execute only after reviewing implementation.
 uv run --no-sync python scripts/trex_offline.py train-representation \
   --config configs/trlt/trlt_alternating.json --seed 0 --device 0
-# Add --max-steps N for bounded debug, or --resume to restore the last state.
+# --max-steps N overrides the configured step budget (e.g. bounded debug).
+# --resume restores the last state; the step budget is a total, not extra steps.
 
 # Stage B: export frozen best representation, separately per split.
 uv run --no-sync python scripts/trex_offline.py export-latents \
@@ -249,8 +250,15 @@ Repeat for the four config JSON files and seeds0,1,2 with the identical split,
 statistics and anchor feature cache. No command implicitly starts another stage.
 Stage A AdamW1e-4, decay1e-4, effective batch32/micro4, global-norm clip1; Stage B
 MLP256/GELU/256/GELU/output348, AdamW1e-3, batch256, decay1e-4.
-The common optimizer also clips probe gradients to global norm1.0. Both default100epochs,
-validation every epoch and patience10. These are initial settings, not performance
+The common optimizer also clips probe gradients to global norm1.0. The four tracked
+experiment configs set Stage A to **15,000 optimizer updates**, with
+`representation.max_steps=15000`, `max_epochs=null` and `patience=null`: no epoch
+limit and no early stopping. Epoch permutations and partial final batches remain
+unchanged. Validation and best/last checkpoints are produced every completed epoch
+and at the final step, including a partial epoch; validation does not stop training
+when patience is null. At effective batch32, each full epoch has1,113updates, so
+15,000updates end in epoch14. Stage B retains its initial defaults: at most100epochs,
+validation every epoch, patience10. These are experiment settings, not performance
 claims. RLT best selection uses validation visual loss; TRLT uses weighted total;
 probe uses normalized action MSE. Different reconstruction objectives do not rank
 representation quality across models. Accumulation uses valid-element and
@@ -260,6 +268,16 @@ parameters and optimizer buffers restore exactly; independently compiled GPU
 training continuations may differ by floating point rounding (one CNN value by
 one ULP observed). Continuation is tested with strict numerical tolerance, while
 freeze and checkpoint content hashes require exact equality.
+
+The Python `TrainConfig` retains epoch-based defaults for legacy callers; pass the
+tracked JSON configs to select this experiment's step-based policy. Optional
+positive `max_epochs` and `patience` remain supported. The CLI `--max-steps` overrides
+the configured step limit, while any configured epoch/early-stopping limits still
+apply. At least a step or epoch limit is required. Older local
+`experiments/trlt/configs/*_b32.json` files are previous run configs and are not
+updated automatically. Existing processes/checkpoints are not migrated; inspect
+config/provenance before resuming. CPU verification evidence for the new policy is
+in `experiments/trlt/stage_a_15000_validation/report.md`.
 
 The probe input is exactly `concat(flatten(stop_gradient(z)), normalized state,
 visual_age_seconds)`. The optimizer contains probe parameters only. No raw tactile,

@@ -368,8 +368,16 @@ def _train(
     if not len(train_dataset) or not len(validation_dataset):
         raise ValueError("Both train and validation datasets must be nonempty")
     _compatible(train_dataset, validation_dataset)
+    if max_steps is None:
+        max_steps = getattr(config, "max_steps", None)
     if max_steps is not None and max_steps <= 0:
         raise ValueError("max_steps must be positive")
+    if config.max_epochs is not None and config.max_epochs <= 0:
+        raise ValueError("max_epochs must be positive or None")
+    if config.max_epochs is None and max_steps is None:
+        raise ValueError("Training requires max_steps or max_epochs")
+    if config.patience is not None and config.patience <= 0:
+        raise ValueError("patience must be positive or None to disable early stopping")
     output = root_path(output_dir)
     log_dir = root_path(log_dir or f"experiments/trlt/{'probe' if probe else 'representation'}/{output.name}")
     if (output / "last" / "metadata.json").exists() and not resume:
@@ -407,7 +415,10 @@ def _train(
         },
         "seed": seed,
         "model_config": asdict(model_config) if model_config else None,
-        "train_config": asdict(config),
+        # Preserve legacy checkpoint identity when no configured step limit exists.
+        "train_config": {
+            key: value for key, value in asdict(config).items() if key != "max_steps" or value is not None
+        },
         "provenance": resolved_provenance,
     }
     identity_hash = digest(identity)
@@ -555,7 +566,7 @@ def _train(
     log_dir.mkdir(parents=True, exist_ok=True)
     first_update = True
     steps_per_epoch = (len(train_dataset) + config.batch_size - 1) // config.batch_size
-    total_steps = steps_per_epoch * config.max_epochs
+    total_steps = steps_per_epoch * config.max_epochs if config.max_epochs is not None else max_steps
     if max_steps is not None:
         total_steps = min(total_steps, max_steps)
     train_sampler = OrderedBatchSampler(config.batch_size)
@@ -589,7 +600,9 @@ def _train(
             unit="step",
             disable=not progress,
         )
-        while epoch < config.max_epochs and bad_epochs < config.patience:
+        while (config.max_epochs is None or epoch < config.max_epochs) and (
+            config.patience is None or bad_epochs < config.patience
+        ):
             if max_steps is not None and int(state.step) >= max_steps:
                 break
             order = np.random.default_rng(np.random.SeedSequence([seed, epoch])).permutation(len(train_dataset))
@@ -643,7 +656,8 @@ def _train(
                 tracker.bar.update(1)
                 if first_update or event["step"] % 10 == 0 or cursor >= len(order):
                     _progress(
-                        f"epoch={epoch + 1}/{config.max_epochs} step={event['step']} "
+                        f"epoch={epoch + 1}/{config.max_epochs if config.max_epochs is not None else 'unbounded'} "
+                        f"step={event['step']} "
                         f"samples={cursor}/{len(order)} loss={loss_sum:.6g} "
                         f"data={data_seconds:.2f}s update={event['update_seconds']:.2f}s"
                     )
