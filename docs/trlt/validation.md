@@ -34,3 +34,28 @@ Full training and final source test action evaluation require an explicit launch
 after implementation review. Legacy CLI and parameter-tree checks are distinct
 from loading an actual legacy RLT checkpoint into a live policy server; consult
 the execution report for what was run and what remains unrun.
+
+Training progress/W&B implementation (2026-11-14): CPU-only synthetic one-update
+training with actual W&B offline recording and tracker lifecycle checks passed
+(2 tests). Evidence: `experiments/trlt/tracking_validation/report.md`, `pytest.log`,
+`pytest.xml` and CLI `dry_run.json`. Online authentication/upload, GPU execution,
+and long source-data runs were not performed for this change.
+
+
+DataLoader/JIT throughput implementation (2026-11-14): validation artifacts are
+in `experiments/trlt/loading_validation/`. The report records CPU tests for worker
+isolation, exact sample/mask/count equivalence, deterministic resume and partial
+batches, concurrent cold-cache construction, nonfinite gradients, plus a bounded
+comparison of eight actual **train** samples. Test samples are not used. GPU
+throughput/utilization and long training are not validated by these host checks.
+
+Final recorded result: 33 CPU regression tests passed, plus one explicit worker
+CPU-configuration isolation check; all eight real train samples matched exactly.
+See `experiments/trlt/loading_validation/summary.json` and the report for commands,
+actual synthetic optimizer steps, warnings and unrun GPU checks.
+
+W&B grouping update (2026-11-14): 4 CPU-only tracking tests passed, including
+one actual synthetic optimizer update with offline W&B. Stage A/B grouping and
+exclusion of aggregation counts/mask fractions were verified. Evidence and exact
+command: `experiments/trlt/tracking_groups_validation/report.md` and adjacent
+`pytest.log`/`pytest.xml`. GPU and online W&B were not run.

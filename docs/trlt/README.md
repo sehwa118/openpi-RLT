@@ -143,7 +143,8 @@ visual MSE divides by valid feature elements. Tactile decoder uses sensor/time
 queries with self-attention and z cross-attention, reconstructing observed resized
 maps. Tactile loss averages pixel error within each valid sensor/frame, then
 averages valid sensor/frames; all-invalid loss is0. Defaults lambda_visual=1 and
-lambda_tactile=1. Sensor/history/latest errors, counts and valid fractions are logged.
+lambda_tactile=1. Sensor/history/latest errors are logged. Counts and valid fractions
+remain in local JSONL for aggregation diagnostics and are excluded from W&B.
 
 Frozen π0.5 receives three images and caption, with deterministic existing resize,
 padding and normalization. `extract_prefix_embeddings(image_only=True,train=False)`
@@ -338,3 +339,104 @@ from steady-state encoding and probe, and distinguish VLM anchor, CNN+fusion,
 and fusion-only paths. They include device/backend, shapes, dtype and parameter
 count. Fusion-only timing uses synthetic projected inputs with runtime arguments;
 it is a component timing, not a complete sensor-to-action latency claim.
+
+## Training progress and W&B
+
+Stage A (`train-representation`) and Stage B (`train-probe`) show a tqdm training
+bar by default: optimizer updates/total, rate, ETA, epoch, loss, data preparation
+seconds and update seconds. Validation has its own batch bar. Initialization and
+JIT messages remain on stderr; stdout remains the final JSON. `--no-progress`
+disables bars for redirected logs. Existing `train.jsonl`/`validation.jsonl` stay
+available independently of W&B. Changes affect newly launched processes only.
+
+W&B is opt-in (`--wandb disabled`, the default). Add these flags to either
+training command when you choose to launch it:
+
+```bash
+--wandb online --wandb-project trlt --wandb-entity YOUR_TEAM \
+  --wandb-name trlt_alternating-seed0 --wandb-group squeeze
+```
+
+Use the credentials already configured for the `sehwa` environment, or supply
+`WANDB_API_KEY` securely in that process environment. No shared authentication
+configuration is modified. `--wandb offline` records locally for later manual
+`wandb sync /absolute/path/to/offline-run-*`; it does not contact the service.
+Local W&B files and `wandb_run.json` (run ID/URL) live under the stage's
+`experiments/trlt/<model>/seed<seed>/<stage>/` directory. Training configuration,
+provenance, device information, per-update losses/metrics/timings and validation
+objective/best value are recorded. Sensor/history vectors become indexed scalar
+series in source ordering. Charts use `optimizer_step` as the x-axis, including
+validation recorded at the same update as training.
+
+After verifying an actual `last` checkpoint, `--resume` restores training state;
+with online tracking it also reuses the saved W&B run ID/project/entity. Changing
+that saved project/entity is rejected. Offline W&B sessions are separate local
+segments (W&B does not support offline run resume). W&B options are separate from
+optimizer identity, so tracking can be enabled when resuming an older checkpoint.
+Existing JSONL history is not automatically uploaded. Enabling W&B does not alter
+checkpoint cadence or start any further pipeline stage.
+
+
+## CPU data loading and GPU updates
+
+Stage A/B use the existing RLT/pi training pattern: a Torch DataLoader with
+spawned CPU workers and bounded batch prefetch, followed by a JIT-compiled JAX
+training step. Defaults are `--num-workers 2 --prefetch-factor 2`; use
+`--num-workers 0` for synchronous debugging. These runtime settings are logged
+in `manifest.json` and do not change optimizer/checkpoint identity.
+
+`num_workers` is the number of CPU loader processes. `prefetch_factor` is the
+number of batches dispatched ahead **per worker**. They are independent and do
+not have to be equal. For example, 2 workers × factor 2 dispatches up to 4
+batches ahead, 4 × 2 dispatches up to 8 with more CPU concurrency, and 2 × 4
+also dispatches up to 8 but retains only 2 loading processes. Dispatched work
+includes batches being prepared, so this is not a guarantee that all are ready.
+More workers can increase loading throughput when CPU/storage capacity permits;
+a larger prefetch buffer can absorb temporary variation but cannot fix sustained
+slow loading. Both can increase host RAM use. Neither changes effective batch
+size, microbatch size or gradient accumulation. With `--num-workers 0`, prefetch
+is unused (the CLI still requires a positive factor if supplied). Defaults 2/2
+are initial settings, not a measured optimum for this server.
+
+The adapter retains the TRLT fields/masks, fixed epoch permutation, and final
+partial batch rather than using the legacy loader's Observation schema and
+`drop_last=True`. Workers perform sample reading, optional CPU MP4 preprocessing,
+collation and mask counts while the accelerator computes the current update.
+They select the CPU backend and cannot access CUDA. Train and validation each
+retain their own workers until the stage exits. Queues hold at most
+`num_workers * prefetch_factor` dispatched batches per loader. Cold tactile
+cache builds are locked per episode/sensor; completed caches are reused.
+
+Gradient calculation, finite checks, accumulation and optimizer application run
+inside one JIT call. Only loss/diagnostics and a finite flag are copied to the
+host; full gradient trees are no longer copied each step. Invalid gradients do
+not enter the optimizer. Accumulation uses a sequential JAX scan (with a separate
+smaller tail microbatch), preserving bounded activation memory and effective-batch
+mask denominators. Per-step diagnostics/timing still synchronize the update;
+CPU prefetch overlaps this interval, but continuous GPU utilization is not promised.
+
+Only successfully consumed batches advance the saved shuffle cursor. Prefetched
+samples do not advance resume state, and bounded training does not dispatch
+batches past its requested step limit. Existing checkpoint/provenance checks
+remain required before choosing `--resume`. These changes apply to new Python
+processes only; no running user job is restarted.
+
+CPU validation evidence and exact commands are recorded in
+`experiments/trlt/loading_validation/report.md`. GPU performance validation is
+not part of this implementation change.
+
+
+W&B metric groups (new processes):
+
+| Top-level group | Contents |
+|---|---|
+| `progress/train/*`, `progress/validation/*` | Step, epoch, training examples and validation improvement flag |
+| `timing/train/*` | Data preparation and update seconds |
+| `stage_a/train/*`, `stage_a/validation/*` | Reconstruction loss, visual/tactile loss and weighted terms, latest/past and per-sensor/per-history errors; validation value/best_value |
+| `stage_b/train/*`, `stage_b/validation/*` | Action probe loss; validation value/best_value |
+
+All groups use `optimizer_step` as the x-axis. W&B excludes all aggregation
+`*_count` metrics and mask `*_valid_fraction` metrics; local JSONL and loss
+aggregation are unchanged. W&B system metrics/config remain available. Previously
+uploaded metric names are retained in existing runs; new names do not delete old
+charts or history on resume.

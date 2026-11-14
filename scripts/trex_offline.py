@@ -28,6 +28,16 @@ def parser():
             command.add_argument("--max-steps", type=int)
         if name in ("train-representation", "train-probe"):
             command.add_argument("--resume", action="store_true")
+            command.add_argument("--no-progress", action="store_true")
+            command.add_argument(
+                "--num-workers", type=int, default=2, help="CPU DataLoader workers; 0 for synchronous loading"
+            )
+            command.add_argument("--prefetch-factor", type=int, default=2, help="Batches queued per CPU worker")
+            command.add_argument("--wandb", choices=("disabled", "online", "offline"), default="disabled")
+            command.add_argument("--wandb-project")
+            command.add_argument("--wandb-entity")
+            command.add_argument("--wandb-name")
+            command.add_argument("--wandb-group")
         if name in ("train-representation", "export-latents"):
             command.add_argument("--data-root", default="datasets/trex_squeeze")
             command.add_argument("--split-manifest")
@@ -115,6 +125,8 @@ def main(argv=None):
     from openpi.trlt.runner import train_representation
 
     assert_gpu()
+    tracking = {key: getattr(args, "wandb_" + key, None) for key in ("project", "entity", "name", "group")}
+    tracking["mode"] = getattr(args, "wandb", "disabled")
     base = f"checkpoints/trlt/{config.mode}/seed{args.seed}"
     logs = f"experiments/trlt/{config.mode}/seed{args.seed}"
     if args.command == "smoke":
@@ -154,6 +166,10 @@ def main(argv=None):
                 seed=args.seed,
                 max_steps=args.max_steps,
                 resume=args.resume,
+                tracking=tracking,
+                progress=not args.no_progress,
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor,
                 log_dir=logs + "/representation",
             )
         else:
@@ -174,6 +190,10 @@ def main(argv=None):
             seed=args.seed,
             max_steps=args.max_steps,
             resume=args.resume,
+            tracking=tracking,
+            progress=not args.no_progress,
+            num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor,
             log_dir=logs + "/probe",
         )
     else:

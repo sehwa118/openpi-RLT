@@ -1,12 +1,12 @@
 """Two-stage offline training. No action-expert or online-RL dependency.
 
-Model computation is JAX/Linen; host datasets are streamed one effective batch at
-one time. Checkpoints include optimizer state and deterministic shuffle position.
+Model computation is JAX/Linen; host batches use bounded CPU worker prefetch. Checkpoints include optimizer state and deterministic shuffle position.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import ExitStack
 from dataclasses import asdict
 import gzip
 import hashlib
@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import sys
 import time
 
 from flax import linen as nn
@@ -24,6 +25,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from tqdm.auto import tqdm
 
 from openpi.trlt.config import ModelConfig
 from openpi.trlt.config import ProbeConfig
@@ -31,7 +33,11 @@ from openpi.trlt.config import TemporalConfig
 from openpi.trlt.config import TrainConfig
 from openpi.trlt.config import digest
 from openpi.trlt.config import root_path
+from openpi.trlt.loading import OrderedBatchSampler
+from openpi.trlt.loading import TrainingCollator
+from openpi.trlt.loading import training_loader
 from openpi.trlt.metrics import ActionMetrics
+from openpi.trlt.tracking import TrainingTracker
 
 OBSERVATION_FIELDS = (
     "visual_features",
@@ -45,6 +51,11 @@ OBSERVATION_FIELDS = (
     "visual_timestamp",
 )
 PROBE_FIELDS = ("z", "proprioception", "visual_age_seconds", "action_target", "action_valid_mask")
+
+
+def _progress(message):
+    # Keep CLI stdout available for its final JSON result, including when piped.
+    tqdm.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", file=sys.stderr)
 
 
 SHARED_PROVENANCE_KEYS = (
@@ -241,6 +252,10 @@ def _counts(samples, probe):
     return {"visual": visual, "tactile": tactile}
 
 
+def _tree_all_finite(tree):
+    return jnp.all(jnp.stack([jnp.all(jnp.isfinite(value)) for value in jax.tree_util.tree_leaves(tree)]))
+
+
 def _optimizer(config, clip=1.0):
     return optax.chain(
         optax.clip_by_global_norm(clip), optax.adamw(config.learning_rate, weight_decay=config.weight_decay)
@@ -342,8 +357,14 @@ def _train(
     provenance,
     log_dir,
     probe,
+    tracking=None,
+    progress=True,
+    num_workers=2,
+    prefetch_factor=2,
 ):
     jax.config.update("jax_default_matmul_precision", "highest")
+    if num_workers < 0 or prefetch_factor < 1:
+        raise ValueError("num_workers must be nonnegative and prefetch_factor must be positive")
     if not len(train_dataset) or not len(validation_dataset):
         raise ValueError("Both train and validation datasets must be nonempty")
     _compatible(train_dataset, validation_dataset)
@@ -353,8 +374,12 @@ def _train(
     log_dir = root_path(log_dir or f"experiments/trlt/{'probe' if probe else 'representation'}/{output.name}")
     if (output / "last" / "metadata.json").exists() and not resume:
         raise FileExistsError("Output checkpoint exists; use resume or another output directory")
+    stage = "probe" if probe else f"representation/{model_config.mode}"
+    _progress(f"{stage}: train={len(train_dataset)} validation={len(validation_dataset)} seed={seed}")
+    _progress("Loading initial sample (uncached tactile episodes require CPU video decoding).")
     fields = PROBE_FIELDS if probe else OBSERVATION_FIELDS
     first = collate([train_dataset[0]], fields)
+    _progress("Initializing model and optimizer on the selected device.")
     if probe:
         model = ActionProbe(config)
         variables = model.init(
@@ -411,11 +436,17 @@ def _train(
         else "visual_loss"
         if model_config.mode == "rlt_original"
         else "weighted_total_reconstruction_loss",
+        data_loading={"num_workers": num_workers, "prefetch_factor": prefetch_factor, "backend": "torch_spawn"},
         actual_train_steps=int(state.step),
         max_steps=max_steps,
         started_at=time.time(),
     )
     write_json(log_dir / "manifest.json", manifest)
+    _progress(
+        f"Ready: devices={manifest['parameter_devices']} parameters={manifest['parameter_count']:,} "
+        f"batch={config.batch_size} microbatch={manifest['microbatch_size']} "
+        f"step={int(state.step)} max_steps={max_steps}; logs={log_dir}"
+    )
     if config.batch_size <= 0 or (
         not probe and (config.microbatch_size <= 0 or config.batch_size % config.microbatch_size)
     ):
@@ -437,8 +468,43 @@ def _train(
             return loss * count / jnp.maximum(denominators[0], 1), {"action_loss": loss, "action_count": count}
         return representation_objective(model, params, batch, denominators, rng, model_config)
 
-    grad_fn = jax.jit(jax.value_and_grad(objective, has_aux=True))
-    update_fn = jax.jit(lambda current, grads: current.apply_gradients(grads=grads))
+    @jax.jit
+    def train_step(current, microbatches, denominator):
+        def gradient(part, batch):
+            rng = jax.random.fold_in(jax.random.fold_in(jax.random.PRNGKey(seed), current.step), part)
+            (value, info), grads = jax.value_and_grad(objective, has_aux=True)(current.params, batch, denominator, rng)
+            return grads, value, info, jnp.isfinite(value) & _tree_all_finite(grads)
+
+        grads, loss_sum, info, finite = gradient(0, microbatches[0])
+        infos = [info]
+
+        def accumulate(carry, inputs):
+            accumulated, total, valid = carry
+            part, batch = inputs
+            more, value, info, ok = gradient(part, batch)
+            return (jax.tree.map(jnp.add, accumulated, more), total + value, valid & ok), info
+
+        # Scan keeps accumulation sequential and compiles a single gradient body,
+        # rather than unrolling up to eight copies with concurrent activations.
+        # A smaller final microbatch is compiled separately, without padding.
+        count = len(microbatches)
+        same_shape_end = count
+        if count > 1 and jax.tree.leaves(microbatches[-1])[0].shape[0] != jax.tree.leaves(microbatches[0])[0].shape[0]:
+            same_shape_end -= 1
+        if same_shape_end > 1:
+            stacked = jax.tree.map(lambda *xs: jnp.stack(xs), *microbatches[1:same_shape_end])
+            (grads, loss_sum, finite), scanned = jax.lax.scan(
+                accumulate, (grads, loss_sum, finite), (jnp.arange(1, same_shape_end), stacked)
+            )
+            infos.extend(jax.tree.map(lambda x, i=i: x[i], scanned) for i in range(same_shape_end - 1))
+        if same_shape_end < count:
+            (grads, loss_sum, finite), info = accumulate((grads, loss_sum, finite), (count - 1, microbatches[-1]))
+            infos.append(info)
+        finite = finite & _tree_all_finite(grads) & jnp.isfinite(loss_sum)
+        # Keep invalid gradients out of the optimizer, without copying the tree
+        # to the host. Only the small diagnostics and this boolean leave JAX.
+        updated = jax.lax.cond(finite, lambda s: s.apply_gradients(grads=grads), lambda s: s, current)
+        return updated, loss_sum, infos, finite
 
     @jax.jit
     def validate(params, batch):
@@ -451,12 +517,17 @@ def _train(
 
     def validation():
         infos, weights = [], []
-        for start in range(0, len(validation_dataset), micro_size):
-            samples = [
-                validation_dataset[index] for index in range(start, min(start + micro_size, len(validation_dataset)))
-            ]
-            infos.append(jax.device_get(validate(state.params, collate(samples, fields))))
-            weights.append(_counts(samples, probe))
+        batches = (len(validation_dataset) + micro_size - 1) // micro_size
+        _progress(f"Validation started: {batches} batches; cold tactile caches may require CPU decoding.")
+        validation_sampler.indices = list(range(len(validation_dataset)))
+        for batch_number, (parts, _, counts, _) in enumerate(
+            tqdm(validation_batches, total=batches, desc="Validation", unit="batch", disable=not progress, leave=False),
+            1,
+        ):
+            infos.append(jax.device_get(validate(state.params, parts[0])))
+            weights.append(counts[0])
+            if batch_number == 1 or batch_number % 50 == 0 or batch_number == batches:
+                _progress(f"Validation batch {batch_number}/{batches}")
         info = _mean_metrics(infos, weights)
         if probe:
             value = info["action_loss"]
@@ -482,90 +553,161 @@ def _train(
 
     start_time = time.perf_counter()
     log_dir.mkdir(parents=True, exist_ok=True)
-    while epoch < config.max_epochs and bad_epochs < config.patience:
-        if max_steps is not None and int(state.step) >= max_steps:
-            break
-        order = np.random.default_rng(np.random.SeedSequence([seed, epoch])).permutation(len(train_dataset))
-        while cursor < len(order):
+    first_update = True
+    steps_per_epoch = (len(train_dataset) + config.batch_size - 1) // config.batch_size
+    total_steps = steps_per_epoch * config.max_epochs
+    if max_steps is not None:
+        total_steps = min(total_steps, max_steps)
+    train_sampler = OrderedBatchSampler(config.batch_size)
+    validation_sampler = OrderedBatchSampler(micro_size)
+    with ExitStack() as stack:
+        train_batches = stack.enter_context(
+            training_loader(
+                train_dataset,
+                train_sampler,
+                TrainingCollator(fields, micro_size, probe),
+                num_workers=num_workers,
+                prefetch_factor=prefetch_factor,
+                seed=seed,
+            )
+        )
+        validation_batches = stack.enter_context(
+            training_loader(
+                validation_dataset,
+                validation_sampler,
+                TrainingCollator(fields, micro_size, probe),
+                num_workers=num_workers,
+                prefetch_factor=prefetch_factor,
+                seed=seed,
+            )
+        )
+        tracker = stack.enter_context(TrainingTracker(log_dir, manifest, options=tracking, resume=resume))
+        tracker.bar = tqdm(
+            total=total_steps,
+            initial=int(state.step),
+            desc=stage,
+            unit="step",
+            disable=not progress,
+        )
+        while epoch < config.max_epochs and bad_epochs < config.patience:
             if max_steps is not None and int(state.step) >= max_steps:
                 break
-            ids = order[cursor : cursor + config.batch_size]
-            samples = [train_dataset[int(index)] for index in ids]
-            counts = _counts(samples, probe)
-            denominator = np.asarray(
-                [counts.get("action", counts.get("visual", 0)), counts.get("tactile", 0)], np.float32
+            order = np.random.default_rng(np.random.SeedSequence([seed, epoch])).permutation(len(train_dataset))
+            # Limit dispatch to the requested steps; prefetched samples never
+            # advance cursor or enter a checkpoint until an update succeeds.
+            end = (
+                len(order)
+                if max_steps is None
+                else min(len(order), cursor + (max_steps - int(state.step)) * config.batch_size)
             )
-            grads = None
-            loss_sum = 0.0
-            infos, weights = [], []
-            for part, start in enumerate(range(0, len(samples), micro_size)):
-                micro = samples[start : start + micro_size]
-                rng = jax.random.fold_in(jax.random.fold_in(jax.random.PRNGKey(seed), int(state.step)), part)
-                (value, info), micro_grads = grad_fn(state.params, collate(micro, fields), denominator, rng)
-                if not np.isfinite(float(value)) or not all(
-                    np.all(np.isfinite(value)) for value in jax.tree_util.tree_leaves(jax.device_get(micro_grads))
-                ):
+            train_sampler.indices = order[cursor:end].tolist()
+            batch_iterator = iter(train_batches)
+            while cursor < end:
+                if max_steps is not None and int(state.step) >= max_steps:
+                    break
+                batch_started = time.perf_counter()
+                if first_update:
+                    _progress(f"Loading first training batch; CPU DataLoader workers={num_workers}.")
+                parts, denominator, weights, examples = next(batch_iterator)
+                data_seconds = time.perf_counter() - batch_started
+                if first_update:
+                    _progress(
+                        f"Batch loaded in {data_seconds:.2f}s; first gradient/update includes JAX JIT compilation."
+                    )
+                update_started = time.perf_counter()
+                state, loss_sum, infos, finite = train_step(state, parts, denominator)
+                loss_sum, infos, finite = jax.device_get((loss_sum, infos, finite))
+                if not finite:
                     raise FloatingPointError("Non-finite reconstruction/probe gradient; no optimizer update saved")
-                grads = micro_grads if grads is None else jax.tree_util.tree_map(jnp.add, grads, micro_grads)
-                loss_sum += float(value)
-                infos.append(jax.device_get(info))
-                weights.append(_counts(micro, probe))
-            state = update_fn(state, grads)
-            jax.block_until_ready(state.params)
-            cursor += len(ids)
-            event = {
-                "step": int(state.step),
-                "epoch": epoch,
-                "loss": loss_sum,
-                "examples": len(samples),
-                "metrics": _mean_metrics(infos, weights),
-            }
-            with (log_dir / "train.jsonl").open("a") as handle:
-                handle.write(json.dumps(event, default=_json, allow_nan=False) + "\n")
-        # A debug interruption receives a validation checkpoint but preserves cursor
-        # so resume continues exactly at the next unconsumed training sample.
-        completed_epoch = cursor >= len(order)
-        validation_value, validation_info = validation()
-        if not np.isfinite(validation_value):
-            raise FloatingPointError("Non-finite validation objective")
-        improved = validation_value < best
-        if improved:
-            best, bad_epochs = validation_value, 0
-        elif completed_epoch:
-            bad_epochs += 1
-        if completed_epoch:
-            epoch, cursor = epoch + 1, 0
-        metadata = dict(checkpoint_metadata(), validation=validation_info)
-        if improved:
-            save_checkpoint(output / "best", state, metadata)
-        save_checkpoint(output / "last", state, metadata)
-        with (log_dir / "validation.jsonl").open("a") as handle:
-            handle.write(
-                json.dumps(
-                    {
-                        "step": int(state.step),
-                        "epoch": epoch,
-                        "value": validation_value,
-                        "best": improved,
-                        "metrics": validation_info,
-                    },
-                    default=_json,
-                    allow_nan=False,
+                jax.block_until_ready(state.params)
+                loss_sum = float(loss_sum)
+                cursor += examples
+                event = {
+                    "step": int(state.step),
+                    "epoch": epoch,
+                    "loss": loss_sum,
+                    "examples": examples,
+                    "metrics": _mean_metrics(infos, weights),
+                    "data_seconds": data_seconds,
+                    "update_seconds": time.perf_counter() - update_started,
+                }
+                with (log_dir / "train.jsonl").open("a") as handle:
+                    handle.write(json.dumps(event, default=_json, allow_nan=False) + "\n")
+                tracker.log("train", event)
+                tracker.bar.set_postfix(
+                    loss=f"{loss_sum:.5g}",
+                    epoch=epoch + 1,
+                    data_s=f"{data_seconds:.2f}",
+                    update_s=f"{event['update_seconds']:.2f}",
                 )
-                + "\n"
+                tracker.bar.update(1)
+                if first_update or event["step"] % 10 == 0 or cursor >= len(order):
+                    _progress(
+                        f"epoch={epoch + 1}/{config.max_epochs} step={event['step']} "
+                        f"samples={cursor}/{len(order)} loss={loss_sum:.6g} "
+                        f"data={data_seconds:.2f}s update={event['update_seconds']:.2f}s"
+                    )
+                first_update = False
+            # A debug interruption receives a validation checkpoint but preserves cursor
+            # so resume continues exactly at the next unconsumed training sample.
+            completed_epoch = cursor >= len(order)
+            validation_value, validation_info = validation()
+            if not np.isfinite(validation_value):
+                raise FloatingPointError("Non-finite validation objective")
+            improved = validation_value < best
+            if improved:
+                best, bad_epochs = validation_value, 0
+            elif completed_epoch:
+                bad_epochs += 1
+            if completed_epoch:
+                epoch, cursor = epoch + 1, 0
+            metadata = dict(checkpoint_metadata(), validation=validation_info)
+            if improved:
+                save_checkpoint(output / "best", state, metadata)
+            save_checkpoint(output / "last", state, metadata)
+            _progress(
+                f"Validation complete: step={int(state.step)} objective={validation_value:.6g} "
+                f"best={improved}; saved checkpoints to {output}"
             )
-        if max_steps is not None and int(state.step) >= max_steps:
-            break
-    manifest.update(
-        actual_train_steps=int(state.step),
-        completed_epochs=epoch,
-        cursor=cursor,
-        best_validation=best if np.isfinite(best) else None,
-        elapsed_seconds=time.perf_counter() - start_time,
-        stopped_by_max_steps=max_steps is not None and int(state.step) >= max_steps,
-    )
-    write_json(log_dir / "manifest.json", manifest)
-    return {"best_checkpoint": str(output / "best"), "last_checkpoint": str(output / "last"), "manifest": manifest}
+            with (log_dir / "validation.jsonl").open("a") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "step": int(state.step),
+                            "epoch": epoch,
+                            "value": validation_value,
+                            "best": improved,
+                            "metrics": validation_info,
+                        },
+                        default=_json,
+                        allow_nan=False,
+                    )
+                    + "\n"
+                )
+            tracker.log(
+                "validation",
+                {
+                    "step": int(state.step),
+                    "epoch": epoch,
+                    "value": validation_value,
+                    "best_value": best,
+                    "improved": improved,
+                    "metrics": validation_info,
+                },
+            )
+            if max_steps is not None and int(state.step) >= max_steps:
+                break
+        manifest.update(
+            actual_train_steps=int(state.step),
+            completed_epochs=epoch,
+            cursor=cursor,
+            best_validation=best if np.isfinite(best) else None,
+            elapsed_seconds=time.perf_counter() - start_time,
+            stopped_by_max_steps=max_steps is not None and int(state.step) >= max_steps,
+        )
+        write_json(log_dir / "manifest.json", manifest)
+        _progress(f"{stage} finished: steps={int(state.step)} elapsed={manifest['elapsed_seconds']:.1f}s")
+        return {"best_checkpoint": str(output / "best"), "last_checkpoint": str(output / "last"), "manifest": manifest}
 
 
 def train_representation(
@@ -580,6 +722,10 @@ def train_representation(
     resume=False,
     provenance=None,
     log_dir=None,
+    tracking=None,
+    progress=True,
+    num_workers=2,
+    prefetch_factor=2,
 ):
     return _train(
         train_dataset,
@@ -593,6 +739,10 @@ def train_representation(
         provenance=provenance,
         log_dir=log_dir,
         probe=False,
+        tracking=tracking,
+        progress=progress,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
     )
 
 
@@ -727,6 +877,10 @@ def train_action_probe(
     resume=False,
     provenance=None,
     log_dir=None,
+    tracking=None,
+    progress=True,
+    num_workers=2,
+    prefetch_factor=2,
 ):
     for dataset in (train_latents, validation_latents):
         if not getattr(dataset, "provenance", {}).get("frozen"):
@@ -749,6 +903,10 @@ def train_action_probe(
         provenance=provenance,
         log_dir=log_dir,
         probe=True,
+        tracking=tracking,
+        progress=progress,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
     )
 
 

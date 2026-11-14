@@ -10,6 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from dataclasses import asdict
+import fcntl
 from functools import lru_cache
 import hashlib
 from itertools import pairwise
@@ -600,7 +601,11 @@ class TrexDataset:
     def __len__(self):
         return len(self.queries)
 
-    @lru_cache(maxsize=2)  # noqa: B019 -- bounded dataset lifetime, cleared on reset
+    # Keep the small state/action tables across shuffled batches. Two entries
+    # caused almost every random sample to reread an entire shared Parquet shard.
+    # This bounded cache fits all 173 squeeze episodes; video arrays stay mmap'd
+    # separately and are not retained here.
+    @lru_cache(maxsize=256)  # noqa: B019 -- bounded dataset lifetime, cleared on reset
     def _episode(self, episode_id):
         return read_episode(self.root, self.rows[episode_id])
 
@@ -625,24 +630,27 @@ class TrexDataset:
                 cache / "metadata.json",
             )
             if not metadata_path.exists():
-                values, stamps = decode_segment(
-                    self.root / "source" / p["path"],
-                    p["from_timestamp"],
-                    p["to_timestamp"],
-                    tactile=True,
-                    resolution=self.resolution,
-                )
                 cache.mkdir(parents=True, exist_ok=True)
-                # Atomic replace plus metadata last prevents partial arrays being accepted.
-                import uuid
+                with (cache / "build.lock").open("a") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    if not metadata_path.exists():
+                        values, stamps = decode_segment(
+                            self.root / "source" / p["path"],
+                            p["from_timestamp"],
+                            p["to_timestamp"],
+                            tactile=True,
+                            resolution=self.resolution,
+                        )
+                        # Atomic replace plus metadata last prevents partial arrays being accepted.
+                        import uuid
 
-                for target, value in ((values_path, values), (times_path, stamps)):
-                    temporary = cache / (target.name + "." + uuid.uuid4().hex + ".tmp")
-                    with temporary.open("wb") as handle:
-                        np.save(handle, value, allow_pickle=False)
-                    temporary.replace(target)
-                _write(metadata_path, identity)
-            elif _read(metadata_path) != identity:
+                        for target, value in ((values_path, values), (times_path, stamps)):
+                            temporary = cache / (target.name + "." + uuid.uuid4().hex + ".tmp")
+                            with temporary.open("wb") as handle:
+                                np.save(handle, value, allow_pickle=False)
+                            temporary.replace(target)
+                        _write(metadata_path, identity)
+            if _read(metadata_path) != identity:
                 raise ValueError("Stale deformation preprocessing cache")
             images[sensor] = np.load(values_path, mmap_mode="r", allow_pickle=False)
             times[sensor] = np.load(times_path, mmap_mode="r", allow_pickle=False)
