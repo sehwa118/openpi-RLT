@@ -1,0 +1,65 @@
+{
+  "model": {
+    "mode": "rlt_original",
+    "input_dim": 2048,
+    "embed_dim": 512,
+    "num_heads": 8,
+    "num_stages": 4,
+    "rlt_encoder_layers": 2,
+    "decoder_layers": 2,
+    "mlp_ratio": 4.0,
+    "dropout_rate": 0.0,
+    "num_sensors": 10,
+    "tactile_channels": 1,
+    "tactile_resolution": 64,
+    "history_frames": 10,
+    "state_dim": 58,
+    "num_cameras": 3,
+    "cnn_channels": [
+      32,
+      64,
+      128
+    ],
+    "lambda_visual": 1.0,
+    "lambda_tactile": 1.0,
+    "geometry_available": false
+  },
+  "temporal": {
+    "fps": 30.0,
+    "visual_refresh_frames": 15,
+    "query_stride_frames": 3,
+    "tactile_history_frames": 10,
+    "tactile_history_stride_frames": 1,
+    "action_horizon_frames": 6,
+    "max_observation_lag_seconds": 0.05
+  },
+  "representation": {
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "batch_size": 32,
+    "microbatch_size": 4,
+    "max_epochs": 100,
+    "patience": 10,
+    "gradient_clip": 1.0
+  },
+  "probe": {
+    "hidden_dim": 256,
+    "depth": 2,
+    "action_dim": 58,
+    "horizon": 6,
+    "dropout_rate": 0.0,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 256,
+    "max_epochs": 100,
+    "patience": 10
+  },
+  "split_seed": 42,
+  "training_seeds": [
+    0,
+    1,
+    2
+  ],
+  "data_root": "datasets/trex_squeeze",
+  "backbone_checkpoint": "checkpoints/openpi-assets/checkpoints/pi05_base/params"
+}

@@ -37,6 +37,10 @@ class RLTokenEncoder(nn.Module):
     ) -> jnp.ndarray:
         cfg = self.config
 
+        # Invalid source values must not enter projections, including NaN padding.
+        if mask is not None:
+            prefix_embs = jnp.where(mask[..., None], prefix_embs, 0.0)
+
         # Project from VLA dim to internal dim if they differ
         if cfg.input_dim != cfg.embed_dim:
             prefix_embs = nn.Dense(cfg.embed_dim, name="input_proj")(prefix_embs)
@@ -51,6 +55,8 @@ class RLTokenEncoder(nn.Module):
             attn_mask = jnp.ones((*prefix_embs.shape[:-2], 1, cfg.num_rl_tokens, prefix_embs.shape[-2]))
 
         y = prefix_embs + self.param("y_pos_enc", sinusoidal_pe_init, prefix_embs.shape[-2:])
+        if mask is not None:
+            y = jnp.where(mask[..., None], y, 0.0)
 
         for _ in range(cfg.num_layers):
             x = CrossAttentionLayer(
@@ -75,6 +81,7 @@ class RLTokenDecoder(nn.Module):
         target_seq_len: int,
         *,
         train: bool = True,
+        target_valid_mask: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         cfg = self.config
 
@@ -85,13 +92,18 @@ class RLTokenDecoder(nn.Module):
 
         y = rl_tokens + self.param("y_pos_enc", sinusoidal_pe_init, rl_tokens.shape[-2:])
 
+        query_self_mask = None
+        if target_valid_mask is not None:
+            chex.assert_shape(target_valid_mask, (*rl_tokens.shape[:-2], target_seq_len))
+            query_self_mask = target_valid_mask[..., None, :, None] & target_valid_mask[..., None, None, :]
+
         for _ in range(cfg.num_layers):
             x = CrossAttentionLayer(
                 dropout_rate=cfg.dropout_rate,
                 num_heads=cfg.num_heads,
                 causal=False,
                 mlp_ratio=cfg.mlp_ratio,
-            )(x, y, train=train, mask_self=None, mask_cross=attn_mask)
+            )(x, y, train=train, mask_self=query_self_mask, mask_cross=attn_mask)
 
         # Project back to VLA dim if they differ
         if cfg.input_dim != cfg.embed_dim:
@@ -124,8 +136,9 @@ class RLTokenModel(nn.Module):
         target_seq_len: int,
         *,
         train: bool = True,
+        target_valid_mask: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
-        return self.decoder(rl_tokens, target_seq_len, train=train)
+        return self.decoder(rl_tokens, target_seq_len, train=train, target_valid_mask=target_valid_mask)
 
     def loss(
         self,
@@ -137,9 +150,11 @@ class RLTokenModel(nn.Module):
         rl_tokens = self.encode(prefix_embs, mask, train=train)
 
         target_seq_len = prefix_embs.shape[-2]
-        reconstructed = self.decode(rl_tokens, target_seq_len, train=train)
+        reconstructed = self.decode(rl_tokens, target_seq_len, train=train, target_valid_mask=mask)
 
         target = jax.lax.stop_gradient(prefix_embs)
+        if mask is not None:
+            target = jnp.where(mask[..., None], target, 0.0)
         sq_error = jnp.square(reconstructed - target)
 
         if mask is not None:

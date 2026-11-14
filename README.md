@@ -34,6 +34,13 @@ High-resolution MP4s are also available:
 [VLA baseline](media/ethernet_vla_baseline.mp4) and
 [RLT policy](media/ethernet_rlt_policy.mp4).
 
+## T-Rex squeeze offline TRLT comparison
+
+The separate [TRLT experiment guide](docs/trlt/README.md) documents four reconstruction
+representations, frozen supervised action probes, exact squeeze-only downloads,
+and bounded GPU validation. Full training and final test evaluation require an
+explicit launch after implementation review.
+
 ## Core Components
 
 The upstream openpi layout is preserved. This section highlights the main
