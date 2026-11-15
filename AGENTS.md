@@ -133,3 +133,71 @@ This is a historical handoff, not a live process-status report. Verify later art
 - CPU-only verification evidence and execution status:
   `experiments/trlt/stage_a_15000_validation/report.md`. This change does not
   authorize starting additional GPU jobs or final test evaluation.
+
+### User-authorized experiment launch: 2026-11-14
+
+- The user requested starting the full experiment, including training and final
+  evaluation, then changed the scope to **one seed only**. Use seed0 for all four
+  models; do not launch seeds1/2. Stage A remains15000updates, no epoch cap or
+  early stopping. Stage B keeps the existing defaults.
+- Active run index: `experiments/trlt/active_run.json`. Run directory:
+  `experiments/trlt/runs/squeeze_15k_seed0_20261114T080906Z/`. An explicit28-stage
+  queue is running in tmux socket `trlt-runs`, session `trlt-15k-seed0`, windows
+  `train` and `reports`. Inspect `status.json`, `events.log`, `current_process.json`,
+  actual stage logs and live processes before claiming progress or restarting.
+- First launched stage: `rlt_original/seed0/Stage_A`, GPU0. Training startup was
+  observed; later steps/completion must be verified. Per-run checkpoints are under
+  `checkpoints/trlt/runs/<run_id>/`; latents are under
+  `datasets/trex_squeeze/latents/<run_id>/`. New CLI `--log-dir` isolates training
+  logs from earlier debug paths. Config snapshots keep effective batch32/micro4,
+  loader workers2/prefetch2; W&B disabled.
+- The explicit queue completes all four models' Stage A/B, seals the selected
+  checkpoint hashes, then extracts shared test features and evaluates all four
+  models. Source changes, occupied GPU or a failing stage prevent the next job
+  from starting. Never duplicate the queue or resume without inspecting actual
+  checkpoint/provenance. Stage start/end/failure reports persist in `events.log`;
+  chat push notifications after the assistant turn ends are unavailable.
+
+### W&B fresh-restart request: 2026-11-14
+
+- User requested W&B online and then explicitly a fresh restart from step0.
+  The previous disabled-W&B run was stopped at387updates; logs are preserved.
+  It is no longer running. Its `superseded.json` records the replacement path.
+- Prepared replacement is indexed by `experiments/trlt/active_run.json`:
+  `experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/`.
+  All8 Stage A/B commands specify online W&B, seed0 and no resume. Stage A
+  remains15000updates; Stage B defaults unchanged. Eight CPU-only CLI dry runs
+  passed. Prepared session name: `trlt-15k-seed0-wandb` on socket `trlt-runs`.
+- User subsequently **explicitly approved** uploading metrics, experiment
+  configuration and normalization statistics to
+  `rnsrns118-seoul-national-university/trlt` and starting the experiment. The
+  earlier automatic-review rejection is resolved. Authorization evidence and
+  launch Git commit are in `wandb_destination_approval.json` in the run folder.
+- Replacement launched at2026-11-14T08:21:45Z, tmux socket `trlt-runs`, session
+  `trlt-15k-seed0-wandb`. First stage: `rlt_original/seed0/Stage_A`, starting
+  from step0 on GPU0. Inspect actual logs and `wandb_run.json` before reporting
+  current progress/upload status. All8 Stage A/B commands enable online W&B.
+  Existing sehwa authentication was reused; no shared settings changed.
+
+### Completed single-seed experiment: 2026-11-15
+
+- The active W&B experiment `squeeze_15k_seed0_wandb_20261114T081820Z` completed
+  all28 stages at2026-11-15T04:17:42Z. All four Stage A runs reached15000updates;
+  Stage B stopped with patience10. All final test evaluations and plots completed.
+- Final primary test normalized episode-macro MSE (seed0,26 episodes):
+  RLT0.071770421, self-only0.068767073, cross-only0.063485767,
+  alternating0.064652117. Cross-only has the lowest observed error (11.54% below
+  RLT). Only seed0 was requested; across-seed variability is unmeasured. Paired
+  episode-bootstrap95% intervals for all differences versus RLT include zero.
+- Detailed evidence: `experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_report.md`,
+  `summary.json`, `plots/`, `events.log`, and per-model evaluation outputs.
+  All selections were sealed before test extraction/evaluation. Equal episode
+  IDs and valid-element counts were verified across all final outputs.
+- Test visual extraction added1573anchors to the existing shared cache, now
+  10230anchors. This supersedes the earlier milestone's test-not-extracted status.
+  Do not rebuild completed caches or restart the completed queue automatically.
+- Experiment review entry points: root `README.md` summarizes the protocol and
+  final results; `docs/trlt/README.md` section "Reviewing the completed experiment"
+  maps the actual configs, commands, training/W&B logs, selected checkpoints,
+  test predictions, and shared dataset provenance to their files. Artifact
+  links point to Git-ignored files on this server, not files shipped in a clone.

@@ -67,3 +67,13 @@ commands are recorded in `experiments/trlt/stage_a_15000_validation/report.md`.
 This setting change does not launch training, migrate prior run configs or alter
 an already running process. Long GPU training and final test evaluation remain
 separate execution decisions.
+
+Full user-authorized experiment completed on2026-11-15 at04:17:42UTC, with all28
+stages successful: four Stage A runs of15000updates, four frozen action probes,
+test feature extraction, four final test evaluations and summary/plot generation.
+Only seed0 was requested. Final report, exact configs/commands, checkpoint
+selection evidence and per-model outputs:
+`experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_report.md`.
+The selected checkpoint hashes were sealed before test extraction. Final test
+episode IDs and valid-element counts match across models. Paired episode-bootstrap
+intervals include zero; no across-seed stability claim is supported.

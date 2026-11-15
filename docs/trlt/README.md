@@ -6,6 +6,83 @@ freezes them, then fits supervised action probes. Online actors/critics, rewards
 action refinement, and action-expert inference/training are outside this pipeline.
 Validation procedures and local execution-report locations are listed in [validation.md](validation.md).
 
+## Reviewing the completed experiment
+
+The seed-0 comparison completed on **2026-11-15 at 04:17:42 UTC**. All four Stage A
+runs reached 15,000 optimizer updates without early stopping. Stage B froze each
+selected representation and used the default action MLP (AdamW 1e-3, batch 256,
+two 256-unit hidden layers, at most 100 epochs, patience 10). All 28 stages,
+including final evaluation on 26 test episodes / 7,823 query windows, completed.
+
+Use this fixed run ID when reviewing the results:
+
+```text
+squeeze_15k_seed0_wandb_20261114T081820Z
+```
+
+The [completed run directory](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/)
+is `experiments/trlt/runs/<run_id>/` relative to the repository root. In the table
+below, paths are relative to that directory. Artifacts under `experiments/`,
+`datasets/`, and `checkpoints/` are Git-ignored and available locally on the
+experiment server, not in a fresh clone. The mutable
+[`active_run.json`](../../experiments/trlt/active_run.json) is a lookup aid; the
+fixed run ID above identifies this completed comparison.
+
+| What to inspect | File(s) inside the completed run | What they establish |
+|---|---|---|
+| Results and interpretation | [final_report.md](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_report.md) | Primary/secondary metrics, relative changes, bootstrap intervals, selected steps/epochs, and limitations |
+| Machine-readable results | [summary.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/summary.json) | Per-model seed-0 results, paired differences, and episode-bootstrap intervals |
+| Quick comparison | [plots/summary.csv](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/plots/summary.csv), [plots/action_mse.png](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/plots/action_mse.png) | Exportable table and figure |
+| Exact experiment settings | [plan.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/plan.json), [configs/](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/configs/) | Models, seed, GPU, source hashes, artifact roots, and the four actual config snapshots |
+| Exact executed commands | [commands.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/commands.json) | Ordered CLI invocations, config paths, input/output paths, and runtime flags |
+| Stage execution history | [events.log](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/events.log), [events.jsonl](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/events.jsonl), [status.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/status.json) | Actual start/end times, durations, successful stages, and final `EXPERIMENT_COMPLETED` event |
+| Console output and diagnostics | [stage_logs/](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/stage_logs/), [console.log](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/console.log) | Initialization, JIT, progress, validation, W&B messages, and CLI output |
+| Training curves and run provenance | `<model>/seed0/{representation,probe}/{train.jsonl,validation.jsonl,manifest.json,wandb_run.json}` | Consumed optimizer steps, train/validation metrics, completed epochs, device/provenance, and W&B run URLs |
+| Final checkpoint selection | [final_selections.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_selections.json) | Selected checkpoint paths/content hashes, sealed before test feature extraction |
+| Per-model test analysis | `<model>/seed0/evaluation/metrics.json` | Primary MSE and errors by episode, object, joint/group, and prediction horizon |
+| Individual test predictions | `<model>/seed0/evaluation/predictions.jsonl.gz` | Ground truth, predictions, masks, source episode/query, and horizon offsets; input to `scripts/report_trlt.py rebuild` |
+| Source/launch context | [source.diff](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/source.diff), [wandb_destination_approval.json](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/wandb_destination_approval.json) | Captured source diff and the Git commit at approved online launch; combine with the source hashes in `plan.json` |
+
+`<model>` is one of `rlt_original`, `trlt_self_only`, `trlt_cross_only`, or
+`trlt_alternating`. For example, start a detailed model review with
+[cross-only test metrics](../../experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/trlt_cross_only/seed0/evaluation/metrics.json).
+Use the run's `configs/` snapshots rather than assuming the current tracked
+`configs/trlt/` examples or old local `*_b32.json` files describe the actual run.
+
+The model artifacts and common dataset provenance are stored separately:
+
+| Artifact | Repository-relative path | How to use it |
+|---|---|---|
+| Trained models | `checkpoints/trlt/runs/<run_id>/<model>/seed0/{representation,probe}/{best,last}/` | `params.msgpack` contains parameters; `state.msgpack` includes optimizer state; `metadata.json` records the saved step, epoch, config, and provenance |
+| Frozen latent caches | `datasets/trex_squeeze/latents/<run_id>/<model>/seed0/{train,validation,test}/manifest.json` | Connects cached latent shards to the representation checkpoint, split, normalization, and temporal settings |
+| Fixed episode split | [splits.json](../../datasets/trex_squeeze/splits.json) | Shared train/validation/test episode IDs, split seed 42, totals 121/26/26 |
+| Train-only statistics | [normalization.json](../../datasets/trex_squeeze/normalization.json) | State/action normalization used by all four models and the final metrics |
+| Shared visual features | [visual_cache/manifest.json](../../datasets/trex_squeeze/visual_cache/manifest.json), [extraction_report.json](../../datasets/trex_squeeze/visual_cache/extraction_report.json) | Feature identity and test extraction evidence; the test extraction added 1,573 anchors to the 8,657 existing train/validation anchors |
+| Shared query contract | `datasets/trex_squeeze/query_manifests/` | Fixed query/anchor/mask sampling, linked by the query-manifest hash in model and cache provenance |
+
+Final evaluation used each stage's **validation-selected `best` checkpoint**,
+not necessarily its `last` checkpoint. The final report lists the selected
+steps/epochs. The initial W&B-disabled run stopped at 387 steps and all earlier
+smoke/debug runs are excluded from these results. Seeds 1/2 were intentionally
+not run; generic `missing_expected_seeds` fields in `summary.json` do not mean
+this requested single-seed experiment is incomplete.
+
+Online training curves are also available in the approved W&B project:
+
+| Model | Stage A: representation | Stage B: action probe |
+|---|---|---|
+| `rlt_original` | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/h7tglcfe) | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/g40xrb9m) |
+| `trlt_self_only` | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/0jknk3lf) | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/2o8q5g11) |
+| `trlt_cross_only` | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/y48npbfn) | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/ykudzxc4) |
+| `trlt_alternating` | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/ej9nrmm7) | [W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/tiro74l1) |
+
+These W&B runs contain training/validation history. Final test metrics and plots
+are saved in the local evaluation/summary files above. This experiment measures
+offline action predictability on held-out demonstrations of seen categories.
+It uses one training seed, and all paired episode-bootstrap 95% intervals versus
+RLT include zero; it does not establish consistent gains across seeds or robot
+control success.
+
 ## Environment and artifacts
 
 Run from the repository root. Start **every new shell** with:
@@ -385,6 +462,42 @@ provenance, device information, per-update losses/metrics/timings and validation
 objective/best value are recorded. Sensor/history vectors become indexed scalar
 series in source ordering. Charts use `optimizer_step` as the x-axis, including
 validation recorded at the same update as training.
+
+Training commands also accept `--log-dir` to place JSONL metrics, manifests and
+optional W&B files under an isolated experiment run. `--output-dir` still selects
+the checkpoint directory. Without `--log-dir`, the existing model/seed log path
+is retained.
+
+The user-authorized single-seed experiment launched on2026-11-14 is indexed by
+`experiments/trlt/active_run.json`. Its run directory contains immutable config
+snapshots, `plan.json`, the explicit CLI queue in `commands.json`, `status.json`,
+per-stage console logs and start/end/failure reports in `events.log`/`events.jsonl`.
+It executes all four architectures with seed0 only, Stage A15000updates and
+default Stage B, followed by sealed checkpoint selection, shared test feature
+extraction and final evaluation. Jobs run serially on GPU0; existing train/val
+features are reused. W&B is disabled for this run. Check actual status/artifacts;
+a launch is not evidence of completion. Observation commands and scope are saved
+in the run's `README.md`. Old debug artifacts remain separate.
+
+The user subsequently requested a fresh restart with W&B online. The initial
+disabled-W&B run was stopped at387updates. Its logs were retained. The replacement
+is indexed by `experiments/trlt/active_run.json`; consult its `status.json` before
+claiming current progress. After an initial automatic-review rejection, the user
+explicitly approved the W&B destination
+`rnsrns118-seoul-national-university/trlt`. The replacement launched
+at2026-11-14T08:21:45Z in tmux session `trlt-15k-seed0-wandb` (socket `trlt-runs`).
+All8 Stage A/B commands enable online W&B. Eight CPU CLI dry runs passed. Actual
+step logs and each stage's `wandb_run.json`/remote history establish execution and
+upload status; a launch alone does not establish successful upload or completion.
+
+Completed experiment (2026-11-15): the approved W&B seed0 run finished all28
+stages at04:17:42UTC, including all four test evaluations. Final primary normalized
+episode-macro MSE: RLT0.071770421, self-only0.068767073,
+cross-only0.063485767, alternating0.064652117. See
+`experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_report.md`
+for exact commands/configs, selected checkpoints, secondary metrics and statistical
+limits. Shared test features are now extracted. This is a completed single-seed
+offline probe comparison, not evidence of closed-loop control performance.
 
 After verifying an actual `last` checkpoint, `--resume` restores training state;
 with online tracking it also reuses the saved W&B run ID/project/entity. Changing

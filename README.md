@@ -36,10 +36,39 @@ High-resolution MP4s are also available:
 
 ## T-Rex squeeze offline TRLT comparison
 
-The separate [TRLT experiment guide](docs/trlt/README.md) documents four reconstruction
-representations, frozen supervised action probes, exact squeeze-only downloads,
-and bounded GPU validation. Full training and final test evaluation require an
-explicit launch after implementation review.
+The [TRLT experiment guide](docs/trlt/README.md) describes the four reconstruction
+representations and frozen supervised action probes. The single-seed experiment
+completed all 28 training, export, evaluation, and reporting stages on
+**2026-11-15 at 04:17:42 UTC**.
+
+All four models used seed **0**, the same train/validation/test episode split
+(121/26/26), and train-only normalization. Stage A ran **15,000 optimizer updates
+without early stopping**. Stage B froze the representation and trained the
+default action MLP, with a 100-epoch cap and patience 10. Checkpoints were selected
+on validation data before final test evaluation.
+
+| Model | Test normalized episode-macro MSE ↓ | Error reduction vs RLT |
+|---|---:|---:|
+| `rlt_original` | 0.071770421 | Baseline |
+| `trlt_self_only` | 0.068767073 | 4.18% |
+| `trlt_cross_only` | **0.063485767** | **11.54%** |
+| `trlt_alternating` | 0.064652117 | 9.92% |
+
+The primary metric averages normalized action MSE within each of the 26 test
+episodes, then equally across episodes. These are single-seed offline prediction
+results; all paired episode-bootstrap 95% intervals versus RLT include zero.
+
+To revisit the experiment, start with the
+[final report](experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/final_report.md),
+[comparison CSV](experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/plots/summary.csv),
+or [comparison plot](experiments/trlt/runs/squeeze_15k_seed0_wandb_20261114T081820Z/plots/action_mse.png).
+The [artifact guide](docs/trlt/README.md#reviewing-the-completed-experiment)
+maps the exact configs, commands, logs, W&B runs, selected checkpoints, predictions,
+and shared data provenance to their files.
+
+Experiment artifacts are Git-ignored local files on the experiment server; they
+are not included in a fresh clone. The guide preserves the completed run ID so
+it can be distinguished from earlier debug runs and future experiments.
 
 ## Core Components
 

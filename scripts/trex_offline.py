@@ -30,6 +30,9 @@ def parser():
             )
         if name in ("train-representation", "train-probe"):
             command.add_argument("--resume", action="store_true")
+            command.add_argument(
+                "--log-dir", help="Training metrics/manifest directory; defaults to the model/seed path"
+            )
             command.add_argument("--no-progress", action="store_true")
             command.add_argument(
                 "--num-workers", type=int, default=2, help="CPU DataLoader workers; 0 for synchronous loading"
@@ -172,7 +175,7 @@ def main(argv=None):
                 progress=not args.no_progress,
                 num_workers=args.num_workers,
                 prefetch_factor=args.prefetch_factor,
-                log_dir=logs + "/representation",
+                log_dir=args.log_dir or logs + "/representation",
             )
         else:
             result = export_frozen_latents(
@@ -196,7 +199,7 @@ def main(argv=None):
             progress=not args.no_progress,
             num_workers=args.num_workers,
             prefetch_factor=args.prefetch_factor,
-            log_dir=logs + "/probe",
+            log_dir=args.log_dir or logs + "/probe",
         )
     else:
         result = evaluate_action_probe(
