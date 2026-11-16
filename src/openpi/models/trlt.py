@@ -13,6 +13,8 @@ import jax.numpy as jnp
 from openpi.models.rl_token import RLTokenConfig
 from openpi.models.rl_token import RLTokenDecoder
 from openpi.models.rl_token import RLTokenEncoder
+from openpi.models.trlt_geometry import fusion_geometry
+from openpi.models.trlt_geometry import geometry_logits
 from openpi.trlt.config import ModelConfig
 
 Batch = dict[str, Any]
@@ -42,14 +44,20 @@ class SafeAttention(nn.Module):
     dim: int
     heads: int
     dropout: float = 0.0
+    rope_axis_dim: int = 16
+    rope_base: float = 10000.0
 
     @nn.compact
-    def __call__(self, query, memory, mask, *, train=False):
+    def __call__(self, query, memory, mask, *, train=False, geometry=None):
         head_dim = self.dim // self.heads
         q = nn.DenseGeneral((self.heads, head_dim), name="query")(query)
         k = nn.DenseGeneral((self.heads, head_dim), name="key")(memory)
         v = nn.DenseGeneral((self.heads, head_dim), name="value")(memory)
-        logits = jnp.einsum("bqhd,bkhd->bhqk", q, k) * head_dim**-0.5
+        if geometry is None:
+            logits = jnp.einsum("bqhd,bkhd->bhqk", q, k)
+        else:
+            logits = geometry_logits(q, k, *geometry, axis_dim=self.rope_axis_dim, base=self.rope_base)
+        logits = logits * head_dim**-0.5
         mask = jnp.broadcast_to(mask[:, None], logits.shape)
         # Finite sentinel + explicit renormalization prevents softmax(all -inf).
         weights = jax.nn.softmax(jnp.where(mask, logits, jnp.finfo(logits.dtype).min), axis=-1)
@@ -65,13 +73,18 @@ class FusionStage(nn.Module):
     config: ModelConfig
 
     @nn.compact
-    def __call__(self, x, mask, valid, *, train=False):
+    def __call__(self, x, mask, valid, *, train=False, geometry=None):
         cfg = self.config
         # One synchronous update from the same old normalized V/U/q state.
         old = nn.LayerNorm(name="attention_norm")(x)
-        x = x + SafeAttention(cfg.embed_dim, cfg.num_heads, cfg.dropout_rate, name="attention")(
-            old, old, mask, train=train
-        )
+        x = x + SafeAttention(
+            cfg.embed_dim,
+            cfg.num_heads,
+            cfg.dropout_rate,
+            rope_axis_dim=cfg.geometry_rope_axis_dim,
+            rope_base=cfg.geometry_rope_base,
+            name="attention",
+        )(old, old, mask, train=train, geometry=geometry)
         y = nn.LayerNorm(name="ffn_norm")(x)
         y = nn.Dense(int(cfg.embed_dim * cfg.mlp_ratio), name="ffn_in")(y)
         y = nn.gelu(y)
@@ -84,7 +97,7 @@ class Fusion(nn.Module):
     config: ModelConfig
 
     @nn.compact
-    def __call__(self, visual, other, visual_valid, other_valid, *, train=False, query_override=None):
+    def __call__(self, visual, other, visual_valid, other_valid, *, train=False, query_override=None, geometry=None):
         cfg = self.config
         q = self.param("q_embed", nn.initializers.normal(0.02), (1, cfg.embed_dim))
         q = jnp.broadcast_to(q, (visual.shape[0], 1, cfg.embed_dim))
@@ -96,7 +109,7 @@ class Fusion(nn.Module):
         for stage in range(cfg.num_stages):
             allowed = fusion_attention_mask(cfg.mode, stage, visual.shape[1], other.shape[1])
             mask = allowed[None] & valid[:, :, None] & valid[:, None, :]
-            x = FusionStage(cfg, name=f"stage_{stage}")(x, mask, valid, train=train)
+            x = FusionStage(cfg, name=f"stage_{stage}")(x, mask, valid, train=train, geometry=geometry)
         return x[:, -1:], x[:, :-1]
 
 
@@ -167,6 +180,14 @@ class TRLTEncoder(nn.Module):
         time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
         time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))
         tactile = tactile + sensor[None, None] + modality[1] + time
+        geometry = None
+        if cfg.geometry_mode != "none":
+            points, geometry_valid, geometry = fusion_geometry(batch, frame_valid, visual_valid, cfg)
+            if cfg.geometry_mode == "mlp":
+                embedding = nn.Dense(cfg.geometry_mlp_hidden, name="geometry_in")(points)
+                embedding = nn.Dense(cfg.embed_dim, name="geometry_out")(nn.gelu(embedding))
+                tactile = tactile + jnp.where(geometry_valid[..., None], embedding, 0)
+                geometry = None
         tactile = tactile.reshape((tactile.shape[0], length * sensors, cfg.embed_dim))
         age = (batch["query_timestamp"] - batch["visual_timestamp"])[..., None]
         if batch["proprioception"].shape[-1] != cfg.state_dim:
@@ -178,7 +199,7 @@ class TRLTEncoder(nn.Module):
         other_valid = jnp.concatenate(
             (frame_valid.reshape((state.shape[0], -1)), jnp.ones((state.shape[0], 1), bool)), axis=1
         )
-        return Fusion(cfg, name="fusion")(visual, other, visual_valid, other_valid, train=train)[0]
+        return Fusion(cfg, name="fusion")(visual, other, visual_valid, other_valid, train=train, geometry=geometry)[0]
 
 
 class TactileDecoder(nn.Module):

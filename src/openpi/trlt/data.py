@@ -539,6 +539,7 @@ class TrexDataset:
         temporal=DEFAULT_TEMPORAL,
         tactile_resolution=64,
         visual_cache=None,
+        geometry_spec=None,
     ):
         self.root = root_path(data_root)
         self.subset = _read(self.root / "subset_manifest.json")
@@ -551,6 +552,11 @@ class TrexDataset:
         self.temporal = temporal
         self.resolution = tactile_resolution
         self.visual_cache = visual_cache
+        self.geometry_cache = None
+        if geometry_spec is not None:
+            from openpi.trlt.geometry import GeometryCache
+
+            self.geometry_cache = GeometryCache(self.root, geometry_spec)
         if hasattr(visual_cache, "manifest"):
             metadata = visual_cache.manifest["metadata"]
             expected = {
@@ -597,6 +603,19 @@ class TrexDataset:
             "sensor_order": SENSORS,
             "feature_cache_hash": getattr(visual_cache, "cache_hash", None),
         }
+
+        if self.geometry_cache is not None:
+            self.provenance["geometry_hash"] = self.geometry_cache.model.identity
+            # Fail before starting training when explicit preparation is incomplete.
+            missing = [
+                e["episode_index"]
+                for e in self.episodes
+                if not (self.geometry_cache.directory / f"episode_{e['episode_index']:06d}.npz").exists()
+            ]
+            if missing:
+                raise FileNotFoundError(
+                    f"Missing geometry episodes {missing[:8]}; run prepare_trex_geometry.py cache --split {split}"
+                )
 
     def __len__(self):
         return len(self.queries)
@@ -694,6 +713,15 @@ class TrexDataset:
         query_time = float(ep["timestamp"][query])
         images, times = self._tactile_episode(episode_id)
         result = build_tactile_window(images, times, query_time, self.temporal, resolution=self.resolution)
+        if self.geometry_cache is not None:
+            result.update(
+                self.geometry_cache.window(
+                    episode_id,
+                    result["tactile_timestamps"],
+                    result["tactile_valid_mask"],
+                    self.temporal.max_observation_lag_seconds,
+                )
+            )
         state_mean = np.asarray(self.normalization["state"]["mean"], np.float32)
         state_std = np.asarray(self.normalization["state"]["std"], np.float32)
         action_mean = np.asarray(self.normalization["action"]["mean"], np.float32)

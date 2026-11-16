@@ -201,3 +201,72 @@ This is a historical handoff, not a live process-status report. Verify later art
   maps the actual configs, commands, training/W&B logs, selected checkpoints,
   test predictions, and shared dataset provenance to their files. Artifact
   links point to Git-ignored files on this server, not files shipped in a clone.
+
+### Optional hand-local geometry: 2026-11-15
+
+- Added `geometry_mode=none|mlp|rope3d`; existing four experiment configs remain
+  geometry-disabled. Six new examples live in `configs/trlt/geometry/{mlp,rope3d}/`.
+  No additional benchmark/GPU job was launched.
+- Contract and commands: `docs/trlt/geometry.md`. CPU FK/cache implementation:
+  `src/openpi/trlt/geometry.py`, `scripts/prepare_trex_geometry.py`. Model ops:
+  `src/openpi/models/trlt_geometry.py`, wired into fusion in `trlt.py`.
+- Each hand uses its own Sharpa root frame with wrist proxy[0,0,0]. Sensor points
+  approximate the elastomer mesh AABB center on each distal link. The tracked
+  spec pins upstream XML/STL hashes and joint mappings; this is not calibrated
+  surface/contact geometry. XYZ uses raw historical joint states aligned to
+  each selected tactile timestamp, never current state repeated over history.
+- MLP adds shared XYZ embedding to tactile tokens. Pair-selective 3D RoPE applies
+  only within the same hand to wrist/tactile and tactile/tactile scores; head,
+  state, readout and cross-hand edges keep ordinary scores. Wrist patches share
+  the wrist proxy and retain patch embeddings. See docs for rotary block/scale.
+- Train121/106673frames and validation26/22051frames geometry caches were computed
+  on CPU at `datasets/trex_squeeze/geometry_cache/58845ba72575ae5547f17e1f298e610a411793f380846ea8078177569fc0c3cf/`.
+  Test geometry is not prepared. Do not automatically rebuild completed caches.
+- Evidence: `experiments/trlt/geometry_validation/report.md`, `verification.json`
+  and the adjacent pytest logs/XML. Geometry16tests + selected regression59tests
+  passed;10optimizer-heavy regressions were deselected after slow CPU compilation.
+  Two reduced synthetic CPU pipelines each did StageA2updates, latent export and
+  StageB1update with optimizer JIT disabled. Existing four architectures' initial
+  parameters/latents exactly matched pre-change source. GPU/full optimizer-JIT
+  performance, new benchmark training and final evaluation remain unrun.
+
+### User-authorized geometry experiment launch: 2026-11-15
+
+- User requested training/evaluation with cross-only and alternating after the
+  MLP/RoPE implementation. Prepared four combinations: `mlp_trlt_cross_only`,
+  `mlp_trlt_alternating`, `rope3d_trlt_cross_only`, `rope3d_trlt_alternating`;
+  seed0 only, Stage A15000updates/batch32/micro4, Stage B defaults unchanged.
+- Active index: `experiments/trlt/geometry_active_run.json` (also `active_run.json`).
+  Run: `experiments/trlt/runs/squeeze_geometry_15k_seed0_20261115T074104Z/`.
+  Tmux socket `trlt-runs`, session `trlt-geometry-seed0-v2`, windows train/reports.
+  Replacement launched on2026-11-15 on GPU0, initially bounded MLP GPU preflight.
+  Inspect actual status/logs before claiming later stages or completion.
+- Explicit32-stage queue: two bounded full-shape GPU optimizer preflights using
+  train/validation only; four Stage A/export train+validation/Stage B pipelines;
+  seal all best checkpoint hashes; prepare test geometry; four test latent
+  exports/evaluations; comparison inputs, summary, plots and final report.
+  The completed10230-anchor visual cache is reused, not rebuilt.
+- Online W&B continues at the previously approved
+  `rnsrns118-seoul-national-university/trlt`;8 main Stage A/B runs have distinct
+  names/group. No raw datasets/media are uploaded. See `authorization.json`.
+- Existing uncommitted implementation is preserved and snapshotted, not reset
+  or committed. `plan.json` records exact source/config/input hashes; changes
+  stop the next stage. A failing stage stops the queue; no implicit resume/retry.
+- Historical RLT/cross-only/alternating no-geometry results are reused only for
+  final comparison. New variants receive distinct comparison labels to prevent
+  duplicate model/seed aggregation; raw evaluations are preserved.
+- Do not duplicate or restart the queue from a launch record. Inspect status,
+  events, processes and actual last checkpoint/config/provenance first. Logs and
+  final results live under this new run; checkpoints/latents use the same run ID
+  under their standard repository roots. Earlier completed results are retained.
+
+- Initial attempt `squeeze_geometry_15k_seed0_20261115T073517Z` was stopped
+  during preflight because its launch helper lacked the multiprocessing main
+  guard. No optimizer checkpoint/update or main training existed. Logs and
+  `superseded.json` are retained; replacement helper is spawn-safe. Active tmux
+  session is `trlt-geometry-seed0-v2`. Inspect current evidence before reporting.
+
+- Replacement started at2026-11-15T07:42:06Z but its first GPU preflight initially
+  entered WAITING_GPU because another user's process occupied GPU0. No main
+  training step had run at that observation. The queue waits automatically;
+  consult `launch_observation.json` and live events for later progress.

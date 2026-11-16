@@ -96,6 +96,10 @@ def main(argv=None):
         raise ValueError("Model/probe and temporal configuration disagree")
     if config.state_dim != 58 or probe.action_dim != 58:
         raise ValueError("T-Rex probe preserves all 58 state/action dimensions")
+    if args.command == "smoke" and config.geometry_mode != "none":
+        raise ValueError(
+            "Geometry smoke uses scripts/verify_trlt_geometry.py (CPU); use explicit training stages for GPU runs"
+        )
     if args.command != "smoke" and (config.num_sensors != 10 or config.tactile_channels != 1):
         raise ValueError("T-Rex requires ten grayscale deformation sensors")
     if args.dry_run:
@@ -132,8 +136,9 @@ def main(argv=None):
     assert_gpu()
     tracking = {key: getattr(args, "wandb_" + key, None) for key in ("project", "entity", "name", "group")}
     tracking["mode"] = getattr(args, "wandb", "disabled")
-    base = f"checkpoints/trlt/{config.mode}/seed{args.seed}"
-    logs = f"experiments/trlt/{config.mode}/seed{args.seed}"
+    variant = config.mode if config.geometry_mode == "none" else f"geometry_{config.geometry_mode}/{config.mode}"
+    base = f"checkpoints/trlt/{variant}/seed{args.seed}"
+    logs = f"experiments/trlt/{variant}/seed{args.seed}"
     if args.command == "smoke":
         result = synthetic_smoke(
             args.output_dir or base + "/synthetic_smoke",
@@ -159,6 +164,7 @@ def main(argv=None):
                 temporal=temporal,
                 tactile_resolution=config.tactile_resolution,
                 visual_cache=cache,
+                geometry_spec=config.geometry_spec if config.geometry_mode != "none" else None,
             )
 
         if args.command == "train-representation":
@@ -181,7 +187,7 @@ def main(argv=None):
             result = export_frozen_latents(
                 dataset(args.split),
                 args.representation_checkpoint,
-                args.output_dir or f"datasets/trex_squeeze/latents/{config.mode}/seed{args.seed}/{args.split}",
+                args.output_dir or f"datasets/trex_squeeze/latents/{variant}/seed{args.seed}/{args.split}",
                 batch_size=args.batch_size,
                 max_samples=args.max_samples,
                 force_cache_rebuild=args.force_cache_rebuild,

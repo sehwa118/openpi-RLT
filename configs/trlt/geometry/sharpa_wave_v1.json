@@ -1,0 +1,1073 @@
+{
+  "schema": 1,
+  "frame": "per-hand root hand_C_MC; fixed wrist proxy at [0,0,0]",
+  "units": "meters",
+  "joint_units": "radians",
+  "point_definition": "center of axis-aligned bounding box of elastomer mesh, transformed by MJCF geom pose; approximate pad volume center, not calibrated surface/contact center",
+  "source": {
+    "repository": "ZhuoyangLiu2005/T-Rex",
+    "revision": "ba4047ce3e9f3d2013d60de600e136897e90ccb8",
+    "files": [
+      {
+        "side": "left",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/left_sharpa_wave/left_sharpa_wave_with_wrist.xml",
+        "sha256": "7588f0401f58d2b7702e85e066fc1d72e14805b8ad5899857a6119aa20ddbf11"
+      },
+      {
+        "side": "left",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/left_sharpa_wave/meshes/elastomer_HB1_TH.STL",
+        "sha256": "437f363ca7a40b6e9b9152ebb81db249c51de71565cdb44b7df6e2cdf0da3312"
+      },
+      {
+        "side": "left",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/left_sharpa_wave/meshes/elastomer_HB1_4F.STL",
+        "sha256": "88b214c5c614b4b5f0c7cf195a90825b41e20745b1b65442854b371ff065e858"
+      },
+      {
+        "side": "right",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/right_sharpa_wave/right_sharpa_wave_with_wrist.xml",
+        "sha256": "94cb03fb918c1f0b2735dc655c9fb902f468a4f08c3e89e9ad6c8f3ed8b4c205"
+      },
+      {
+        "side": "right",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/right_sharpa_wave/meshes/elastomer_HB1_TH.STL",
+        "sha256": "437f363ca7a40b6e9b9152ebb81db249c51de71565cdb44b7df6e2cdf0da3312"
+      },
+      {
+        "side": "right",
+        "path": "dataset_quickstart/third_party/sharpa-urdf-usd-xml/wave_01/right_sharpa_wave/meshes/elastomer_HB1_4F.STL",
+        "sha256": "88b214c5c614b4b5f0c7cf195a90825b41e20745b1b65442854b371ff065e858"
+      }
+    ]
+  },
+  "source_license": "Apache-2.0; Sharpa hand model; see upstream third_party/README.md",
+  "joint_order": [
+    "thumb_CMC_FE",
+    "thumb_CMC_AA",
+    "thumb_MCP_FE",
+    "thumb_MCP_AA",
+    "thumb_IP",
+    "index_MCP_FE",
+    "index_MCP_AA",
+    "index_PIP",
+    "index_DIP",
+    "middle_MCP_FE",
+    "middle_MCP_AA",
+    "middle_PIP",
+    "middle_DIP",
+    "ring_MCP_FE",
+    "ring_MCP_AA",
+    "ring_PIP",
+    "ring_DIP",
+    "pinky_CMC",
+    "pinky_MCP_FE",
+    "pinky_MCP_AA",
+    "pinky_PIP",
+    "pinky_DIP"
+  ],
+  "sensor_order": [
+    "observation.images.tactile_left_deform_thumb",
+    "observation.images.tactile_left_deform_index",
+    "observation.images.tactile_left_deform_middle",
+    "observation.images.tactile_left_deform_ring",
+    "observation.images.tactile_left_deform_pinky",
+    "observation.images.tactile_right_deform_thumb",
+    "observation.images.tactile_right_deform_index",
+    "observation.images.tactile_right_deform_middle",
+    "observation.images.tactile_right_deform_ring",
+    "observation.images.tactile_right_deform_pinky"
+  ],
+  "sensors": [
+    {
+      "side": "left",
+      "finger": "thumb",
+      "chain": [
+        {
+          "body": "left_thumb_CMC_VL",
+          "pos": [
+            0.01,
+            -0.026,
+            0.0504
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.0,
+            0.0,
+            -0.707108
+          ],
+          "joint": "left_thumb_CMC_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_thumb_MC",
+          "pos": [
+            0.0,
+            -0.005,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.65328,
+            0.653282,
+            -0.270598,
+            0.270599
+          ],
+          "joint": "left_thumb_CMC_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_thumb_MCP_VL",
+          "pos": [
+            0.065,
+            -0.006,
+            -0.010392
+          ],
+          "quat_wxyz": [
+            0.965926,
+            -0.25882,
+            0.0,
+            0.0
+          ],
+          "joint": "left_thumb_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_thumb_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_thumb_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_thumb_DP",
+          "pos": [
+            0.039,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_thumb_IP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.021019340492784977,
+        0.0007737085688859224,
+        5.257315933704376e-07
+      ]
+    },
+    {
+      "side": "left",
+      "finger": "index",
+      "chain": [
+        {
+          "body": "left_index_MCP_VL",
+          "pos": [
+            0.001,
+            -0.0303,
+            0.1249
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "left_index_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_index_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_index_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_index_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_index_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_index_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "left_index_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183799063786864,
+        0.0010503192897886038,
+        2.6030465960502625e-07
+      ]
+    },
+    {
+      "side": "left",
+      "finger": "middle",
+      "chain": [
+        {
+          "body": "left_middle_MCP_VL",
+          "pos": [
+            0.0,
+            -0.01,
+            0.1279
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "left_middle_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_middle_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_middle_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_middle_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_middle_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_middle_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "left_middle_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183799063786864,
+        0.0010503192897886038,
+        2.6030465960502625e-07
+      ]
+    },
+    {
+      "side": "left",
+      "finger": "ring",
+      "chain": [
+        {
+          "body": "left_ring_MCP_VL",
+          "pos": [
+            0.0015,
+            0.0103,
+            0.1219
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "left_ring_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_ring_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_ring_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_ring_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_ring_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_ring_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "left_ring_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183794861193546,
+        0.0010503880249764564,
+        3.2903984745483775e-07
+      ]
+    },
+    {
+      "side": "left",
+      "finger": "pinky",
+      "chain": [
+        {
+          "body": "left_pinky_MC",
+          "pos": [
+            0.01136,
+            0.0263,
+            0.1159
+          ],
+          "quat_wxyz": [
+            1.34924e-11,
+            3.67321e-06,
+            -1.0,
+            -3.67321e-06
+          ],
+          "joint": "left_pinky_CMC",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_pinky_MCP_VL",
+          "pos": [
+            0.00836,
+            0.0048,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.5,
+            0.5,
+            0.500002
+          ],
+          "joint": "left_pinky_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_pinky_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_pinky_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_pinky_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "left_pinky_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "left_pinky_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "left_pinky_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183799063786864,
+        0.0010503192897886038,
+        2.6030465960502625e-07
+      ]
+    },
+    {
+      "side": "right",
+      "finger": "thumb",
+      "chain": [
+        {
+          "body": "right_thumb_CMC_VL",
+          "pos": [
+            0.01,
+            0.026,
+            0.0504
+          ],
+          "quat_wxyz": [
+            -2.59734e-06,
+            0.707105,
+            0.707108,
+            -2.59735e-06
+          ],
+          "joint": "right_thumb_CMC_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_thumb_MC",
+          "pos": [
+            0.0,
+            -0.005,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.65328,
+            -0.653282,
+            0.270598,
+            0.270599
+          ],
+          "joint": "right_thumb_CMC_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_thumb_MCP_VL",
+          "pos": [
+            0.065,
+            -0.006,
+            0.010392
+          ],
+          "quat_wxyz": [
+            0.965926,
+            0.25882,
+            0.0,
+            0.0
+          ],
+          "joint": "right_thumb_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_thumb_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_thumb_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_thumb_DP",
+          "pos": [
+            0.039,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_thumb_IP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.02101933739551147,
+        0.0007737926462417022,
+        6.098089491467575e-07
+      ]
+    },
+    {
+      "side": "right",
+      "finger": "index",
+      "chain": [
+        {
+          "body": "right_index_MCP_VL",
+          "pos": [
+            0.001,
+            0.0303,
+            0.1249
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "right_index_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_index_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_index_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_index_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_index_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_index_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "right_index_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183794861193546,
+        0.0010503880249764564,
+        3.2903984745483775e-07
+      ]
+    },
+    {
+      "side": "right",
+      "finger": "middle",
+      "chain": [
+        {
+          "body": "right_middle_MCP_VL",
+          "pos": [
+            0.0,
+            0.01,
+            0.1279
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "right_middle_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_middle_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_middle_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_middle_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_middle_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_middle_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "right_middle_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183799063786864,
+        0.0010503192897886038,
+        2.6030465960502625e-07
+      ]
+    },
+    {
+      "side": "right",
+      "finger": "ring",
+      "chain": [
+        {
+          "body": "right_ring_MCP_VL",
+          "pos": [
+            0.0015,
+            -0.0103,
+            0.1219
+          ],
+          "quat_wxyz": [
+            0.499998,
+            -0.500002,
+            -0.5,
+            -0.5
+          ],
+          "joint": "right_ring_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_ring_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_ring_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_ring_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_ring_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_ring_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "right_ring_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183794861193546,
+        0.0010503880249764564,
+        3.2903984745483775e-07
+      ]
+    },
+    {
+      "side": "right",
+      "finger": "pinky",
+      "chain": [
+        {
+          "body": "right_pinky_MC",
+          "pos": [
+            0.01136,
+            -0.0263,
+            0.1159
+          ],
+          "quat_wxyz": [
+            -3.67321e-06,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "joint": "right_pinky_CMC",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_pinky_MCP_VL",
+          "pos": [
+            0.00836,
+            0.0048,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.499998,
+            0.5,
+            -0.5,
+            0.500002
+          ],
+          "joint": "right_pinky_MCP_FE",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_pinky_PP",
+          "pos": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            -0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_pinky_MCP_AA",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_pinky_MP",
+          "pos": [
+            0.047,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            0.707105,
+            0.707108,
+            0.0,
+            0.0
+          ],
+          "joint": "right_pinky_PIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "body": "right_pinky_DP",
+          "pos": [
+            0.0315,
+            0.0,
+            0.0
+          ],
+          "quat_wxyz": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "joint": "right_pinky_DIP",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pad_offset_m": [
+        0.017183794861193546,
+        0.0010503880249764564,
+        3.2903984745483775e-07
+      ]
+    }
+  ],
+  "hash": "58845ba72575ae5547f17e1f298e610a411793f380846ea8078177569fc0c3cf"
+}

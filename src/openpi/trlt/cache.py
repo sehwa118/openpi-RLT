@@ -179,6 +179,8 @@ class CachedContext:
     def reset(self, episode_id=None):
         self.episode_id = episode_id
         self.visual = None
+        self.geometry_history = {}
+        self.geometry_enabled = False
         self.history = deque(maxlen=self.temporal.tactile_history_frames * self.temporal.tactile_history_stride_frames)
 
     def update_visual(self, context, *, episode_id, timestamp, camera_order=CAMERAS):
@@ -188,12 +190,28 @@ class CachedContext:
             self.reset(episode_id)
         self.visual = {**context, "visual_timestamp": float(timestamp)}
 
-    def append_tactile(self, image, valid_mask, *, episode_id, timestamp):
+    def append_tactile(self, image, valid_mask, *, episode_id, timestamp, positions=None, geometry_valid_mask=None):
         if episode_id != self.episode_id:
             self.reset(episode_id)
         if self.history and timestamp <= self.history[-1][0]:
             raise ValueError("Tactile observations must be strictly chronological")
+        if positions is not None:
+            points = np.asarray(positions, np.float32)
+            if points.shape != (len(valid_mask), 3):
+                raise ValueError("Sensor positions must be [Ns,3] in hand-local meters")
+            geometry_valid = np.asarray(valid_mask, bool).copy()
+            if geometry_valid_mask is not None:
+                if np.shape(geometry_valid_mask) != np.shape(valid_mask):
+                    raise ValueError("Geometry mask must match tactile sensor mask")
+                geometry_valid &= np.asarray(geometry_valid_mask, bool)
+            geometry_valid &= np.isfinite(points).all(axis=-1)
+            self.geometry_history[float(timestamp)] = (np.where(geometry_valid[:, None], points, 0), geometry_valid)
+            self.geometry_enabled = True
+        elif geometry_valid_mask is not None:
+            raise ValueError("Geometry mask requires positions")
         self.history.append((float(timestamp), np.asarray(image), np.asarray(valid_mask, dtype=bool)))
+        retained = {entry[0] for entry in self.history}
+        self.geometry_history = {stamp: value for stamp, value in self.geometry_history.items() if stamp in retained}
 
     def encode(self, encode_fn, *, current_state, query_time):
         if self.visual is None or self.visual["visual_timestamp"] > query_time:
@@ -207,6 +225,8 @@ class CachedContext:
         tactile = np.zeros((length, *template.shape), np.float32)
         mask = np.zeros((length, template.shape[0]), bool)
         stamps = np.full((length, template.shape[0]), query_time, np.float32)
+        positions = np.zeros((length, template.shape[0], 3), np.float32)
+        geometry_valid = np.zeros((length, template.shape[0]), bool)
         for slot in range(length):
             desired = query_time - (length - 1 - slot) * stride / self.temporal.fps
             previous = [entry for entry in available if entry[0] <= desired + 1e-7]
@@ -215,6 +235,10 @@ class CachedContext:
                 tactile[slot] = np.where(valid[:, None, None, None], value, 0)
                 mask[slot] = valid
                 stamps[slot] = stamp
+                if stamp in self.geometry_history:
+                    points, point_valid = self.geometry_history[stamp]
+                    positions[slot] = points
+                    geometry_valid[slot] = point_valid & valid
         batch = {key: np.asarray(self.visual[key])[None] for key in ("visual_features", "visual_valid_mask")}
         batch.update(
             tactile=tactile[None],
@@ -224,4 +248,7 @@ class CachedContext:
             query_timestamp=np.array([query_time], np.float32),
             visual_timestamp=np.array([self.visual["visual_timestamp"]], np.float32),
         )
+        if self.geometry_enabled:
+            batch["tactile_positions"] = positions[None]
+            batch["geometry_valid_mask"] = geometry_valid[None]
         return encode_fn(batch)

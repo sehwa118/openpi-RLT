@@ -77,3 +77,27 @@ selection evidence and per-model outputs:
 The selected checkpoint hashes were sealed before test extraction. Final test
 episode IDs and valid-element counts match across models. Paired episode-bootstrap
 intervals include zero; no across-seed stability claim is supported.
+
+Hand-local geometry extension (2026-11-15): CPU checks completed for mesh-derived
+pad-center FK, causal geometry caches, MLP and same-hand wrist/tactile 3D RoPE.
+Evidence: `experiments/trlt/geometry_validation/report.md`, `verification.json`,
+`geometry_pytest.xml` (16 passed) and `regression_pytest.xml` (59 passed,
+10 optimizer-heavy cases deselected). Eight actual train queries match exactly
+between synchronous/worker loading; original-source reference FK agrees within
+7.32e-9 m. Two reduced synthetic CPU pipelines each completed two representation
+updates, latent export and one probe update (optimizer JIT disabled for these
+bounded smokes). Train/validation geometry caches cover121/26episodes; test
+geometry was not prepared. GPU/full optimizer JIT, benchmark training and final
+evaluation were not run. See [geometry.md](geometry.md) for the exact contract,
+commands and limits; the execution report distinguishes interrupted initial
+compile attempts from completed checks.
+
+Geometry experiment replacement launch (2026-11-15 at07:42:06UTC): user-authorized actual GPU
+preflights/training/evaluation are queued in
+`experiments/trlt/runs/squeeze_geometry_15k_seed0_20261115T074104Z/`.
+The preparation's `cpu_preflight.json` verifies all147train/validationgeometry
+episodes and all1573existing test visual anchors without decoding/evaluating test.
+Eight CLI dry runs passed. GPU preflight reports are written only after actual
+successful optimizer updates; consult per-run status/events and
+`*_gpu_preflight.json` before claiming success. Historical CPU-only implementation
+validation above remains distinct from this newly authorized experiment.

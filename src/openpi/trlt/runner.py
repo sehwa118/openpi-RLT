@@ -32,6 +32,7 @@ from openpi.trlt.config import ProbeConfig
 from openpi.trlt.config import TemporalConfig
 from openpi.trlt.config import TrainConfig
 from openpi.trlt.config import digest
+from openpi.trlt.config import model_config_dict
 from openpi.trlt.config import root_path
 from openpi.trlt.loading import OrderedBatchSampler
 from openpi.trlt.loading import TrainingCollator
@@ -46,6 +47,8 @@ OBSERVATION_FIELDS = (
     "tactile_valid_mask",
     "spatial_valid_mask",
     "tactile_timestamps",
+    "tactile_positions",
+    "geometry_valid_mask",
     "proprioception",
     "query_timestamp",
     "visual_timestamp",
@@ -59,6 +62,7 @@ def _progress(message):
 
 
 SHARED_PROVENANCE_KEYS = (
+    "geometry_hash",
     "revision",
     "dataset_revision",
     "split_hash",
@@ -82,6 +86,8 @@ SHARED_PROVENANCE_KEYS = (
 
 
 def _check_provenance(expected, actual, label):
+    if expected.get("geometry_hash") != actual.get("geometry_hash"):
+        raise ValueError(f"{label} provenance mismatch: geometry_hash")
     for key in SHARED_PROVENANCE_KEYS:
         value = expected.get(key)
         if value is not None and digest(actual.get(key)) != digest(value):
@@ -219,12 +225,15 @@ def assert_gpu():
 def collate(samples, fields):
     if not samples:
         raise ValueError("Empty batch")
-    required = set(fields) - {"spatial_valid_mask"}
+    required = set(fields) - {"spatial_valid_mask", "tactile_positions", "geometry_valid_mask"}
     if any(not required.issubset(sample) for sample in samples):
         raise ValueError(f"Missing tensor field(s); expected {sorted(required)}")
+    for sample in samples:
+        if ("tactile_positions" in sample) != ("geometry_valid_mask" in sample):
+            raise ValueError("Geometry positions and validity mask must be supplied together")
     output = {}
     for key in fields:
-        if key in samples[0]:
+        if any(key in sample for sample in samples):
             if any(key not in sample for sample in samples):
                 raise ValueError(f"Mixed presence of optional field {key}")
             output[key] = np.stack([sample[key] for sample in samples])
@@ -414,7 +423,7 @@ def _train(
             key: {"shape": list(value.shape[1:]), "dtype": str(value.dtype)} for key, value in first.items()
         },
         "seed": seed,
-        "model_config": asdict(model_config) if model_config else None,
+        "model_config": model_config_dict(model_config) if model_config else None,
         # Preserve legacy checkpoint identity when no configured step limit exists.
         "train_config": {
             key: value for key, value in asdict(config).items() if key != "max_steps" or value is not None
@@ -1025,7 +1034,7 @@ class SyntheticDataset:
         visual_valid = np.ones(c.num_cameras * 2, bool)
         visual_valid[-1] = index % 2 == 0
         state = rng.normal(size=58).astype(np.float32) * 0.1
-        return {
+        sample = {
             "visual_features": rng.normal(size=(len(visual_valid), c.input_dim)).astype(np.float32),
             "visual_valid_mask": visual_valid,
             "tactile": rng.uniform(
@@ -1046,6 +1055,10 @@ class SyntheticDataset:
             "object": "synthetic",
             "caption": "squeeze",
         }
+        if c.geometry_mode != "none":
+            sample["tactile_positions"] = rng.normal(size=(history, c.num_sensors, 3)).astype(np.float32) * 0.05
+            sample["geometry_valid_mask"] = tactile_valid.copy()
+        return sample
 
 
 def synthetic_smoke(output_dir, *, mode="trlt_cross_only", seed=0, max_steps=2):

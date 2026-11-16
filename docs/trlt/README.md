@@ -166,8 +166,9 @@ by source pointers/revision/resize; trainable CNN outputs are never cached.
 | `episode_id`, `anchor_frame_index`, `query_frame_index` | Integer `[B]` |
 | `action_target`, `action_valid_mask` | Normalized float32 `[B,6,58]`, bool `[B,6]` |
 
-True means valid. Object/caption stay host metadata. Geometry is unavailable and
-has zero contribution. Missing/padded values are excluded before CNN/attention
+True means valid. Object/caption stay host metadata. The original comparison has no geometry contribution. Optional hand-local
+XYZ, MLP and pair-selective wrist/tactile 3D RoPE are described in
+[geometry.md](geometry.md). Missing/padded values are excluded before CNN/attention
 and from losses; invalid action tail labels never enter loss or metrics.
 
 At30Hz query frames are0,3,6,…; anchor is `15*floor(query/15)`; tactile contains
@@ -571,3 +572,12 @@ All groups use `optimizer_step` as the x-axis. W&B excludes all aggregation
 aggregation are unchanged. W&B system metrics/config remain available. Previously
 uploaded metric names are retained in existing runs; new names do not delete old
 charts or history on resume.
+
+
+## Optional tactile geometry extension (2026-11-15)
+
+See [geometry.md](geometry.md) for the hand-local coordinate/time contract,
+mesh-derived pad-center proxy, explicit CPU cache preparation, MLP and same-hand
+wrist/tactile 3D RoPE, six example configs and CPU validation evidence. Existing
+four experiment configs and completed results keep their original no-geometry
+meaning. Additional benchmark training and final test were not launched.
