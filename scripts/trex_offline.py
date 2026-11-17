@@ -96,6 +96,8 @@ def main(argv=None):
         raise ValueError("Model/probe and temporal configuration disagree")
     if config.state_dim != 58 or probe.action_dim != 58:
         raise ValueError("T-Rex probe preserves all 58 state/action dimensions")
+    if args.command == "smoke" and not config.use_sensor_id_embedding:
+        raise ValueError("Sensor ID ablation requires its explicit config and training/export stages")
     if args.command == "smoke" and config.geometry_mode != "none":
         raise ValueError(
             "Geometry smoke uses scripts/verify_trlt_geometry.py (CPU); use explicit training stages for GPU runs"
@@ -137,6 +139,8 @@ def main(argv=None):
     tracking = {key: getattr(args, "wandb_" + key, None) for key in ("project", "entity", "name", "group")}
     tracking["mode"] = getattr(args, "wandb", "disabled")
     variant = config.mode if config.geometry_mode == "none" else f"geometry_{config.geometry_mode}/{config.mode}"
+    if not config.use_sensor_id_embedding:
+        variant = "no_sensor_id/" + variant
     base = f"checkpoints/trlt/{variant}/seed{args.seed}"
     logs = f"experiments/trlt/{variant}/seed{args.seed}"
     if args.command == "smoke":

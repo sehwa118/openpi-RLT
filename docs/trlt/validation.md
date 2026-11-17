@@ -101,3 +101,31 @@ Eight CLI dry runs passed. GPU preflight reports are written only after actual
 successful optimizer updates; consult per-run status/events and
 `*_gpu_preflight.json` before claiming success. Historical CPU-only implementation
 validation above remains distinct from this newly authorized experiment.
+
+Encoder sensor-ID ablation (2026-11-16):16CPU tensor/gradient/identity tests passed;
+six model initializations/latents exactly match pre-change source when the flag
+is enabled, and eight historical saved config identities are preserved. Evidence:
+`experiments/trlt/no_sensor_id_validation/report.md`, pytest XML/log and
+compatibility.json. The user-authorized20-stage GPU queue for alternating
+MLP/RoPE3D with encoder ID disabled and Stage A10000updates is isolated under
+`experiments/trlt/runs/squeeze_no_sensor_id_alt_10k_seed0_20261116T062348Z/`.
+Stage B defaults remain unchanged; decoder sensor_query is retained. Consult
+actual per-run GPU preflight reports/events before reporting GPU success.
+
+Subsequent GPU evidence for the no-sensor-ID experiment: both MLP and RoPE
+full-shape preflights passed one optimizer update and four validation queries
+on GPU0, batch32/micro4. See the run's `*_gpu_preflight.json` and
+`experiments/trlt/no_sensor_id_validation/gpu_preflight_summary.json`. The
+bounded checks used train/validation only and do not establish benchmark results.
+
+No-encoder-sensor-ID completion (verified2026-11-17): the authorized run
+`squeeze_no_sensor_id_alt_10k_seed0_20261116T062348Z` finished all20stages
+at2026-11-16T13:39:08Z. Actual last representation checkpoints show10000updates
+for both candidates; both final evaluations contain26episodes and2715096valid
+action elements. `final_report.md`, `historical_comparisons.json`,
+`comparison_validation.json`, `final_selections.json` and per-model
+`seed0/evaluation/metrics.json` are the evidence under that run directory.
+Primary MSE:MLP0.066686607, RoPE0.076711648. Historical ID-on comparisons also
+change Stage A budget15000→10000; both paired95% intervals include zero.
+See [the combined results summary](architecture_and_results.md). No new training,
+extraction or evaluation ran during this documentation update.

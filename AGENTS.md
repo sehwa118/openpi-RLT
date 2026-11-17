@@ -270,3 +270,65 @@ This is a historical handoff, not a live process-status report. Verify later art
   entered WAITING_GPU because another user's process occupied GPU0. No main
   training step had run at that observation. The queue waits automatically;
   consult `launch_observation.json` and live events for later progress.
+
+### Fusion and geometry results summary: 2026-11-16
+
+- Single-document Korean architecture/protocol/results summary:
+  `docs/trlt/architecture_and_results.md`, linked from the TRLT README.
+- Verified both runs' actual completed status, config snapshots and final metrics.
+  Geometry run `squeeze_geometry_15k_seed0_20261115T074104Z` completed all32stages
+  at2026-11-16T05:37:39Z, including all four final evaluations. This supersedes
+  earlier launch/waiting and test-geometry-not-prepared observations.
+- Geometry MLP cross/alternating primary MSE:0.075159157/0.065073679; RoPE
+  cross/alternating:0.067697001/0.073425785. All exceed their same-architecture
+  no-geometry seed0 baseline. Only MLP cross has a positive paired episode-
+  bootstrap95% interval excluding zero; training-seed variability is unmeasured.
+- This documentation update ran no new training, extraction or evaluation.
+
+### Alternating no encoder sensor ID,10k: 2026-11-16
+
+- User requested MLP/3D RoPE with tactile encoder sensor-ID embedding removed,
+  alternating only, Stage A10000updates. Added default-true
+  `ModelConfig.use_sensor_id_embedding`; false removes encoder `sensor_embed`.
+  Decoder `sensor_query`, all other embeddings and RoPE hand grouping remain.
+  Default serialization omits the new true field to preserve old identities.
+- Two seed0 config examples:
+  `configs/trlt/geometry/no_sensor_id/{mlp,rope3d}_trlt_alternating_10k.json`.
+  Stage B unchanged. Historical ID-on runs used15000updates, so comparison changes
+  both ID and budget. Do not describe it as a matched-budget ID-only ablation.
+- CPU evidence: `experiments/trlt/no_sensor_id_validation/report.md`;
+  16tests passed, six parameter/latent cases exactly matched old source with
+  ID enabled, eight historical saved config identities preserved. The new run's
+  cpu_preflight.json records cache checks and four CLI dry runs.
+- Authorized20-stage queue launched via tmux socket `trlt-runs`, session
+  `trlt-no-sensor-id-10k`. Run:
+  `experiments/trlt/runs/squeeze_no_sensor_id_alt_10k_seed0_20261116T062348Z/`.
+  Index: `experiments/trlt/no_sensor_id_active_run.json` (also active/geometry index).
+  It performs two bounded full-shape GPU optimizer checks, both Stage A/B
+  pipelines, seals selections, reuses test geometry, evaluates both and writes
+  comparison reports. Online W&B continues in the approved project. Inspect
+  actual status/logs before claiming updates or completion. No resume/extra seed.
+- Existing user documentation changes were preserved. Do not duplicate this
+  queue or rebuild completed caches. Source/config/input hashes are verified
+  during GPU waiting and immediately before each stage. Changes or failures stop
+  the queue. Check actual last checkpoint/provenance before any recovery.
+
+- Both new full-shape GPU preflights actually passed: MLP and RoPE each
+  completed1optimizer update +4queryvalidation on GPU0 with batch32/micro4
+  and encoder sensor ID disabled. Reports are `*_gpu_preflight.json` inside
+  the run, summarized in `experiments/trlt/no_sensor_id_validation/gpu_preflight_summary.json`.
+  These checks are not the two10kbenchmark results; inspect current progress.
+
+### Completed no-encoder-sensor-ID experiment: verified 2026-11-17
+
+- Run `squeeze_no_sensor_id_alt_10k_seed0_20261116T062348Z` completed all20stages
+  at2026-11-16T13:39:08Z, including both final test evaluations and reports.
+  Both Stage A runs reached10000updates. Final seed0/26episode primary MSE:
+  MLP0.066686607; RoPE3D0.076711648. Existing test target counts agree.
+- Historical same-geometry ID-on15k comparisons: MLP+2.48%, RoPE+4.48%MSE;
+  both paired episode-bootstrap95% intervals include zero. ID and training
+  budget both changed, so this is not an isolated ID-only effect.
+- `docs/trlt/architecture_and_results.md` now includes these results, actual
+  selected steps and links to the final report/historical_comparisons.json.
+  This supersedes earlier launch/preflight-only observations; do not restart
+  or duplicate the completed queue. No training/evaluation was rerun for summary.

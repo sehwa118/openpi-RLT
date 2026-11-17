@@ -175,7 +175,11 @@ class TRLTEncoder(nn.Module):
         length, sensors = tactile.shape[1:3]
         if sensors != cfg.num_sensors or length > cfg.history_frames:
             raise ValueError("Tactile sensor/history shape differs from model config")
-        sensor = self.param("sensor_embed", nn.initializers.normal(0.02), (cfg.num_sensors, cfg.embed_dim))
+        if cfg.use_sensor_id_embedding:
+            sensor = self.param("sensor_embed", nn.initializers.normal(0.02), (cfg.num_sensors, cfg.embed_dim))
+        else:
+            # Ablate encoder identity only; decoder sensor queries define output slots.
+            sensor = jnp.zeros((cfg.num_sensors, cfg.embed_dim), tactile.dtype)
         relative = relative_times(batch)[..., None]
         time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
         time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))

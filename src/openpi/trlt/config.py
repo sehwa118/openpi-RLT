@@ -66,6 +66,7 @@ class ModelConfig:
     decoder_layers: int = 2
     mlp_ratio: float = 4.0
     dropout_rate: float = 0.0
+    use_sensor_id_embedding: bool = True
     num_sensors: int = 10
     tactile_channels: int = 1
     tactile_resolution: int = 64
@@ -104,6 +105,10 @@ class ModelConfig:
             <= 0
         ):
             raise ValueError("Model dimensions and layer counts must be positive")
+        if not isinstance(self.use_sensor_id_embedding, bool):
+            raise ValueError("use_sensor_id_embedding must be a boolean")
+        if self.mode == "rlt_original" and not self.use_sensor_id_embedding:
+            raise ValueError("Sensor ID ablation applies to TRLT encoder tactile tokens only")
         if min(self.lambda_visual, self.lambda_tactile) < 0:
             raise ValueError("Loss weights must be nonnegative")
         if self.mode not in MODELS or self.embed_dim % self.num_heads:
@@ -173,6 +178,8 @@ def config_dict(config):
 def model_config_dict(config):
     """Keep disabled-geometry checkpoint identity compatible with pre-geometry runs."""
     value = asdict(config)
+    if config.use_sensor_id_embedding:
+        value.pop("use_sensor_id_embedding")
     if config.geometry_mode == "none":
         for key in (
             "geometry_mode",

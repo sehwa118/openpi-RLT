@@ -6,6 +6,9 @@ freezes them, then fits supervised action probes. Online actors/critics, rewards
 action refinement, and action-expert inference/training are outside this pipeline.
 Validation procedures and local execution-report locations are listed in [validation.md](validation.md).
 
+Fusion 구조와 fusion·geometry·encoder sensor ID 제거 실험의 완료 결과 요약은
+[**Fusion Transformer와 Geometry Embedding 실험 정리**](architecture_and_results.md)를 참조하세요.
+
 ## Reviewing the completed experiment
 
 The seed-0 comparison completed on **2026-11-15 at 04:17:42 UTC**. All four Stage A

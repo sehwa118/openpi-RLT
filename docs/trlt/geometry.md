@@ -171,3 +171,33 @@ mutable lookup is `experiments/trlt/geometry_active_run.json`. Exact config/sour
 snapshots, command queue, authorizations and observation commands are in the
 run's `README.md` and `plan.json`. The prior completed experiment is preserved;
 its no-geometry RLT/cross-only/alternating metrics are reused for comparison.
+
+## Alternating without encoder sensor ID (2026-11-16)
+
+`ModelConfig.use_sensor_id_embedding` defaults to `true`. Setting it to `false`
+removes the fusion encoder's learned `sensor_embed` parameter and its additive
+contribution to tactile tokens. Decoder `sensor_query` is retained to identify
+reconstruction output slots. Modality/time/camera embeddings and same-hand RoPE
+grouping remain unchanged. This is an encoder input ablation, not removal of all
+identity information from training. Default-enabled behavior and serialization
+preserve previous checkpoint identities; disabling the flag changes identity.
+
+The user requested exactly two new seed0 experiments: alternating + MLP and
+alternating +3D RoPE, both with encoder sensor ID disabled. Stage A uses
+**10000total optimizer updates**, batch32/micro4, no epoch cap/early stopping.
+Stage B and final evaluation retain the existing protocol. Config examples:
+`configs/trlt/geometry/no_sensor_id/{mlp,rope3d}_trlt_alternating_10k.json`.
+The CLI's default output paths add a `no_sensor_id/` prefix for this ablation.
+
+Existing geometry/visual caches, splits and train-only statistics are reused.
+Historical ID-on results used15000updates, so their comparison with these new
+runs changes **both sensor ID and training budget**. No matched-budget ID-on
+control or extra seed was requested/launched. The test set has already been
+used in previous experiments and is not a fresh untouched holdout.
+
+Execution: `experiments/trlt/runs/squeeze_no_sensor_id_alt_10k_seed0_20261116T062348Z/`;
+mutable lookup `experiments/trlt/no_sensor_id_active_run.json`, tmux socket
+`trlt-runs`, session `trlt-no-sensor-id-10k`. The20-stage queue has two bounded GPU
+checks, both full Stage A/B pipelines, selection sealing, test cache reuse and
+both final evaluations/reports. Inspect status/events and actual checkpoints
+before claiming progress/completion. It uses online W&B in the approved project.
