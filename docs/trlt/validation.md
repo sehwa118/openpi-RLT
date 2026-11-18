@@ -7,6 +7,18 @@ The actual execution report is `experiments/trlt/validation/implementation_repor
 Case-level checks and original logs are in `final_test_coverage.json` and the adjacent
 XML/log files. Run provenance is `experiments/trlt/implementation_manifest.json`.
 
+The separate [3DTacDex Assembly preparation](3dtacdex_assembly.md) has its own
+CPU source/conversion evidence under
+`experiments/trlt/3dtacdex_assembly/preparation/`. Inspect `pipeline_status.json`
+and actual checksum/audit/validation outputs for completion; it does not change
+the existing T-Rex experiment or authorize an Assembly training run.
+Its all-source preparation completed on2026-11-17:8CPUtests passed;
+22069numeric/source/instructionrows and44138RGBframes matched exactly;
+248actual reader boundary samples passed. All124segments, including89`nouse`
+segments, are retained with command masks. Actual evidence:
+`experiments/trlt/3dtacdex_assembly/preparation/report.md` and
+`lerobot_all_validation.json` in that directory. No Assembly benchmark was run.
+
 The checks cover attention connectivity and synchronous updates, readout isolation,
 masked losses, causal windows, split/normalization integrity, decoder equality,
 finite gradients and updates, frozen representations, cache invalidation, and
@@ -129,3 +141,31 @@ Primary MSE:MLP0.066686607, RoPE0.076711648. Historical ID-on comparisons also
 change Stage A budget15000→10000; both paired95% intervals include zero.
 See [the combined results summary](architecture_and_results.md). No new training,
 extraction or evaluation ran during this documentation update.
+
+Assembly four-model implementation (2026-11-17): see
+[the experiment protocol](3dtacdex_experiments.md) and actual CPU evidence in
+`experiments/trlt/3dtacdex_assembly/implementation/report.md`. Checks cover grouped
+source trajectories, masked train-only statistics, native tactile models, 22D
+element masks, test selection seals and real train/validation worker equivalence.
+Full-backbone extraction, GPU optimizer validation, benchmark training and final
+test evaluation were not run for this implementation.
+
+Assembly revision (2026-11-18): fusion modality embeddings removed in Assembly
+configs, Stage A8000updates/effective batch64/micro4, train/validation/test and
+validation checkpoint selection retained by explicit user choice. CPU evidence:
+`experiments/trlt/3dtacdex_assembly/revisions/20261118_no_modality_8k_b64/report.md`.
+GPU/batch64 benchmark validation and training remain unrun.
+
+Assembly full-microbatch/W&B revision (2026-11-18): Stage A batch64/micro64,
+accumulation1, W&B train logging every10optimizer steps with validation events
+retained. User authorized bounded GPU validation; real train/validation subset
+feature/optimizer checks and actual W&B offline files are recorded under
+`experiments/trlt/3dtacdex_assembly/revisions/20261118_full_b64_wandb10/`.
+Read `report.md`/`summary.json` for actual completions. No final test or8000-step
+benchmark is part of those checks; the earlier micro4 evidence is historical.
+
+The full-microbatch checks completed: four full-size models each passed1GPU
+update at64/64/1 +4validation queries; alternating frozen export/probe12updates
+also passed. Actual offline records and a single minimal online verification run
+were checked through the remote API.28latest CPU testcase outcomes and28CLI dry
+runs passed. These bounded results do not mean the8000-step plan was launched.

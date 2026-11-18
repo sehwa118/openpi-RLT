@@ -73,11 +73,21 @@ def grouped_metrics(event, phase, stage):
     return result
 
 
+def tracking_options(options=None):
+    result = {"mode": "disabled", "log_every_steps": 1, **(options or {})}
+    if result["mode"] not in ("disabled", "offline", "online"):
+        raise ValueError("Unknown W&B mode")
+    interval = result["log_every_steps"]
+    if not isinstance(interval, int) or isinstance(interval, bool) or interval < 1:
+        raise ValueError("W&B log_every_steps must be a positive integer")
+    return result
+
+
 class TrainingTracker:
     def __init__(self, directory, manifest, *, options=None, resume=False):
         self.directory = Path(directory)
         self.manifest = manifest
-        self.options = options or {}
+        self.options = tracking_options(options)
         self.resume = resume
         self.run = None
         self.bar = None
@@ -128,6 +138,8 @@ class TrainingTracker:
 
     def log(self, prefix, event):
         if self.run is not None:
+            if prefix == "train" and event["step"] % self.options["log_every_steps"]:
+                return
             self.run.log(grouped_metrics(event, prefix, self.manifest.get("stage", "representation")))
 
     def __exit__(self, exc_type, exc, traceback):

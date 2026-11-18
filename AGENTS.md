@@ -332,3 +332,128 @@ This is a historical handoff, not a live process-status report. Verify later art
   selected steps and links to the final report/historical_comparisons.json.
   This supersedes earlier launch/preflight-only observations; do not restart
   or duplicate the completed queue. No training/evaluation was rerun for summary.
+
+### 3DTacDex Assembly preparation: 2026-11-17
+
+- User authorized the first preparation scope on new branch `TRLT-3DTacDex`
+  (explicitly approved this spelling because existing `TRLT` prevents a
+  `TRLT/3DTacDex` ref). Scope: Assembly download, command audit, local LeRobot
+  conversion and validation. No Assembly GPU/training/evaluation is authorized.
+- **Include all source versions, including `nouse`**, at the user's explicit
+  request. Source metadata:124segments /109original trajectories /22069frames;
+  `nouse` is a historical early-version label, not a verified failure label.
+  Preserve group/label/trajectory/frame/position provenance and missing-command
+  masks. Optional `--cohort paper` exists but is not the requested conversion.
+- Source pin, tensor/time/action contract and commands:
+  `docs/trlt/3dtacdex_assembly.md`. CLI: `scripts/prepare_3dtacdex.py`;
+  implementation: `src/openpi/trlt/tacdex_{source,download,lerobot}.py`.
+  Data: `datasets/3dtacdex_assembly/{source,lerobot_all}/`. Existing T-Rex
+  loaders, model configs, caches and completed experiments are unchanged.
+- Execution evidence/status:
+  `experiments/trlt/3dtacdex_assembly/preparation/pipeline_status.json`, stage
+  logs and reports in that directory. Inspect these and live processes before
+  duplicating/restarting preparation. Historical launch messages are not proof
+  of completion. All four preparation stages completed on2026-11-17; source
+  SHA256 matched, all22069numeric/source/instructionrows and44138RGBframes
+  matched exactly, and248actual LeRobot boundary samples passed. Eight CPU
+  tests passed. See `report.md`, `source_audit.json`, `lerobot_all_validation.json`
+  and `summary.json`; no benchmark training/evaluation was performed.
+- Converted dataset: `datasets/3dtacdex_assembly/lerobot_all/` (124episodes,
+  109source trajectories). All22069frames are retained;10missing hand-command
+  frames have false element masks, not synthesized labels. `segments.csv` and
+  `source_group_preview.png` in the report directory support manual review.
+  The CLI keeps derived Arrow caches in `datasets/3dtacdex_assembly/reader_cache/`
+  without changing account/auth paths. Do not rebuild the completed data blindly.
+- Initial SDK download lost its temporary partial file on interruption;
+  `download_transport_migration.json` records this. The replacement downloader
+  uses durable10MiB completion records,16HTTPworkers and refreshed signed URLs.
+  Reuse its `.ranges.part`/`.ranges.json`; do not delete them or revert to SDK
+  transfer over that file. Full SHA256 remains required before success.
+- Conversion uses installed LeRobot v2.1 with lossless CPU H.264 RGB, native
+  float64 tactile/state/command storage and explicit command masks. Original
+  source timestamps remain separate from nominal5Hz video/container PTS.
+  Raw command units/independent command timing are not asserted from joint-state
+  units. No experiment split or train normalization is fitted in this scope.
+
+### 3DTac-Dex four-model experiment implementation: 2026-11-17
+
+- User requested the experiment plan and additional code, not a training launch.
+  Plan/contract: `docs/trlt/3dtacdex_experiments.md`. Four seed0 configs are in
+  `configs/trlt/3dtacdex_assembly/`; Stage A15000updates/batch32/micro4, Stage B
+  defaults unchanged. No Assembly GPU/backbone extraction/benchmark/final test
+  has been authorized or run in this implementation session.
+- Native `[8,15,3]` tactile uses a shared ordered-taxel MLP and native reconstruction;
+  state/action22D, two external cameras/512expected prefix tokens. Default image
+  model serialization preserves historical T-Rex identities. Geometry is disabled.
+- CPU protocol prepared under `datasets/3dtacdex_assembly/protocol/`: all124segments
+  including nouse; source-trajectory grouped and group/label-stratified seed42.
+  Train/validation/test:77/16/16original trajectories,89/17/18segments,
+  14819/3472/3778frames. Reuse saved split and masked train-only state/action/taxel
+  normalization; never use LeRobot whole-container statistics for training.
+- Implementation: `src/openpi/trlt/tacdex_data.py`, `tacdex_experiment.py`, native
+  encoder in `models/trlt.py`; shared runner/metrics now accept element action masks.
+  Preparation/verification: `scripts/{prepare_tacdex_experiment,verify_tacdex}.py`.
+  `scripts/tacdex_offline.py` delegates explicit stages to the shared runner.
+- `scripts/plan_tacdex_experiment.py plan` writes config snapshots and34ordered
+  command argv arrays, never launches a queue. `seal` fixes all four Stage A/B
+  selected checkpoint hashes before Assembly test CLI access; changed selections
+  are rejected. Final macro/paired-bootstrap unit is the original source trajectory,
+  not a LeRobot segment. Source lineage remains in latent/prediction outputs.
+- Actual CPU checks/evidence, commands and unrun work:
+  `experiments/trlt/3dtacdex_assembly/implementation/report.md`. GPU/full-backbone
+  two-camera extraction, full-size optimizer checks, training and final test remain
+  separate execution steps. No existing T-Rex caches/results or active-run indices
+  were rebuilt, resumed, or modified.
+
+### Assembly modality/budget revision: 2026-11-18
+
+- User requested removing fusion modality embeddings and changing Stage A to
+  8000optimizer updates with effective batch64. All four Assembly configs now
+  set `use_modality_embedding=false`, batch64/micro4/accumulation16; epoch cap and
+  early stopping remain disabled. Camera/patch/sensor/time embeddings and decoder
+  queries remain. Original RLT has no TRLT modality embedding to remove.
+- Default-true `ModelConfig.use_modality_embedding` preserves old T-Rex and earlier
+  config identities by omitting the true field from model serialization. False
+  removes the encoder parameter, rather than retaining a trainable zero tensor.
+- User explicitly chose to KEEP existing train/validation/test with validation
+  checkpoint selection. Reuse existing saved split/normalization. Both Stage A/B
+  use train for optimizer updates, validation for selection, and test only for
+  final evaluation after sealing. Stage B defaults remain unchanged.
+- Current prepared plan (not launched):
+  `experiments/trlt/3dtacdex_assembly/plans/assembly_8k_b64_no_modality_seed0_20261118_v2_prepared/plan.json`.
+  Earlier15k/batch32 plans are historical and superseded for future execution.
+- Contract: `docs/trlt/3dtacdex_experiments.md`. Actual CPU revision evidence:
+  `experiments/trlt/3dtacdex_assembly/revisions/20261118_no_modality_8k_b64/report.md`.
+  No GPU job, extraction, benchmark training or final test was launched.
+
+### Assembly full microbatch and W&B verification: 2026-11-18
+
+- User corrected Stage A to effective batch64 / microbatch64 / accumulation1 and
+  requested native Assembly W&B settings plus train logging every10optimizer steps.
+  All four Assembly configs retain8000updates and no modality embedding. Existing
+  split/train normalization and Stage B optimizer policy remain unchanged.
+- Config `tracking` enables the approved project
+  `rnsrns118-seoul-national-university/trlt`, log_every_steps10. Main Stage A/B names
+  are `assembly/<model>/seed0/stage_a|stage_b`, grouped by run ID; future preflights
+  explicitly disable W&B. CLI `--wandb-log-every` overrides config; old T-Rex
+  defaults remain disabled/every1. Validation events and every-step local JSONL
+  are retained. Tracking/data summaries are runtime metadata outside identity.
+- User explicitly authorized GPU validation in this turn. GPU0 was idle before
+  the sequential checks. Actual two-camera prefix extraction passed24train/val
+  anchors, shape512x2048. Four full-size models each passed1optimizer update at
+  batch64/micro64 plus4validation queries. Frozen exports and an alternating
+  probe passed12bounded updates. No final-test samples or benchmark training ran.
+- Actual GPU checks used offline W&B. SDK files confirm native2cameras/8pads,
+  state/action22D, history3, modality=false and64/64/1. The actual12-update probe
+  has train logging only at10 and all validation events.28latest CPU test cases
+  pass (includes corrected SDK initial-config record reader), plus28CLI dry runs.
+- A single explicitly labeled online logging-verification run replayed two actual
+  probe events and minimal configuration; remote API confirmed step10/metadata:
+  `https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/9c6s4a63`.
+  No raw media, normalization arrays or model artifacts were uploaded in this
+  online check. Initial30s timeout was recovered on the SAME run ID; auth unchanged.
+- Current plan, NOT launched:
+  `experiments/trlt/3dtacdex_assembly/plans/assembly_8k_fullb64_wandb10_seed0_20261118_prepared/plan.json`.
+  Older micro4 plans are superseded. Evidence/commands/configs/logs:
+  `experiments/trlt/3dtacdex_assembly/revisions/20261118_full_b64_wandb10/report.md`.
+  Bounded validation did not authorize an8000-step launch or final test evaluation.

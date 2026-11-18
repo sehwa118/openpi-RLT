@@ -6,6 +6,10 @@ freezes them, then fits supervised action probes. Online actors/critics, rewards
 action refinement, and action-expert inference/training are outside this pipeline.
 Validation procedures and local execution-report locations are listed in [validation.md](validation.md).
 
+The separate [3DTacDex Assembly preparation](3dtacdex_assembly.md) path downloads,
+audits, and converts all Assembly source versions to local LeRobot v2.1. It does
+not change the T-Rex training protocol or launch an Assembly experiment.
+
 Fusion 구조와 fusion·geometry·encoder sensor ID 제거 실험의 완료 결과 요약은
 [**Fusion Transformer와 Geometry Embedding 실험 정리**](architecture_and_results.md)를 참조하세요.
 
@@ -584,3 +588,19 @@ mesh-derived pad-center proxy, explicit CPU cache preparation, MLP and same-hand
 wrist/tactile 3D RoPE, six example configs and CPU validation evidence. Existing
 four experiment configs and completed results keep their original no-geometry
 meaning. Additional benchmark training and final test were not launched.
+
+## 3DTac-Dex Assembly comparison (2026-11-17)
+
+See [the Assembly experiment plan](3dtacdex_experiments.md) for the native taxel
+adapter, four-model seed0 protocol, fixed grouped split, masked train statistics,
+explicit stage commands and test checkpoint seal. This is separate from the
+completed T-Rex results. Assembly GPU feature extraction/training/final evaluation
+have not been launched by this implementation work.
+
+W&B cadence/config update (2026-11-18): `--wandb-log-every N` controls train metric
+logging in optimizer steps; validation events are always retained and local JSONL
+still records every update. Assembly configs select online W&B and N=10 and
+record native dataset dimensions/ordering plus the representation config in both
+Stage A/B runs. Defaults for older configs remain disabled/N=1. See the
+[Assembly experiment plan](3dtacdex_experiments.md) for batch64/micro64 and bounded
+GPU/offline-SDK verification evidence; no full experiment was launched.

@@ -18,7 +18,8 @@ from openpi.trlt.config import root_path
 
 
 class FrozenPrefixExtractor:
-    def __init__(self, checkpoint, *, max_token_len=200):
+    def __init__(self, checkpoint, *, max_token_len=200, camera_keys=CAMERA_KEYS):
+        self.camera_keys = tuple(camera_keys)
         os.environ.setdefault("OPENPI_DATA_HOME", str(root_path("checkpoints")))
         import flax.nnx as nnx
         import jax
@@ -45,7 +46,9 @@ class FrozenPrefixExtractor:
         self.model.eval()
         # Existing NNX/Linen bridge remains the sole backbone implementation.
         self.forward = nnx.jit(
-            lambda model, obs: model.extract_prefix_embeddings(jax.random.key(0), obs, train=False, image_only=True)
+            lambda model, obs: model.extract_prefix_embeddings(
+                jax.random.key(0), obs, train=False, image_only=True, image_keys=self.camera_keys
+            )
         )
         state = nnx.state(self.model, nnx.Param)
         leaves = jax.tree.leaves(state)
@@ -63,15 +66,15 @@ class FrozenPrefixExtractor:
         from openpi.models.model import Observation
 
         images = anchor["images"]
-        if tuple(images) != CAMERA_KEYS:
+        if tuple(images) != self.camera_keys:
             raise ValueError(f"Camera order/mapping mismatch: {tuple(images)}")
         prompt, prompt_mask = self.tokenizer.tokenize(anchor["caption"], state=None)
         # Prefix-only embed_prefix reads images and caption, never Observation.state.
         # This placeholder is not truncated T-Rex state and is never probe input.
         observation = Observation.from_dict(
             {
-                "image": {name: np.asarray(images[name], np.uint8)[None] for name in CAMERA_KEYS},
-                "image_mask": {name: np.ones((1,), bool) for name in CAMERA_KEYS},
+                "image": {name: np.asarray(images[name], np.uint8)[None] for name in self.camera_keys},
+                "image_mask": {name: np.ones((1,), bool) for name in self.camera_keys},
                 "state": np.zeros((1, self.config.action_dim), np.float32),
                 "tokenized_prompt": prompt[None].astype(np.int32),
                 "tokenized_prompt_mask": prompt_mask[None],
@@ -81,8 +84,8 @@ class FrozenPrefixExtractor:
         features, mask = self.forward(self.model, jax.tree.map(jnp.asarray, observation))
         features.block_until_ready()
         elapsed = time.perf_counter() - start
-        if features.shape[1] % len(CAMERA_KEYS) != 0:
-            raise ValueError("Image token count does not cover all three cameras")
+        if features.shape[1] % len(self.camera_keys) != 0:
+            raise ValueError("Image token count does not cover requested cameras")
         return {
             "input_devices": sorted(
                 {str(d) for x in jax.tree.leaves(jax.tree.map(jnp.asarray, observation)) for d in x.devices()}
@@ -128,12 +131,14 @@ def extract_visual_cache(
         if max_anchors <= 0:
             raise ValueError("max_anchors must be positive")
         keys = keys[:max_anchors]
+    camera_keys = tuple(getattr(dataset, "camera_keys", CAMERA_KEYS))
+    tokens = 256 * len(camera_keys)
     # Standard pi0.5 So400m/14 produces 256 tokens/camera at224 and Gemma width2048.
     # Verify these assumptions against the first real forward; estimates aren't measurements.
     estimate = {
         "anchors_requested": len(keys),
-        "estimated_shape": [768, 2048],
-        "estimated_float32_bytes": len(keys) * (768 * 2048 * 4 + 768),
+        "estimated_shape": [tokens, 2048],
+        "estimated_float32_bytes": len(keys) * (tokens * 2048 * 4 + tokens),
         "plan_only": plan_only,
     }
     destination = root_path(output_dir)
@@ -149,12 +154,12 @@ def extract_visual_cache(
             for episode, anchor in keys
         )
     )
-    estimate["estimated_new_bytes"] = missing * (768 * 2048 * 4 + 768)
+    estimate["estimated_new_bytes"] = missing * (tokens * 2048 * 4 + tokens)
     if plan_only:
         return estimate
     if estimate["estimated_new_bytes"] * 1.05 > estimate["available_disk_bytes"]:
         raise ValueError("Insufficient disk space for planned visual cache; no backbone initialized")
-    extractor = FrozenPrefixExtractor(backbone_checkpoint)
+    extractor = FrozenPrefixExtractor(backbone_checkpoint, camera_keys=camera_keys)
     caption_hash = dataset.provenance["caption_hash"]
     metadata = feature_metadata(
         revision=revision,
@@ -163,6 +168,8 @@ def extract_visual_cache(
         caption_hash=caption_hash,
         tokenizer_hash=digest({"model": extractor.tokenizer_hash, "max_len": extractor.config.max_token_len}),
         temporal=temporal,
+        camera_order=getattr(dataset, "camera_order", None),
+        camera_keys=camera_keys,
     )
     cache = FeatureCache.create(output_dir, metadata, force=force)
     timings = []
@@ -183,7 +190,7 @@ def extract_visual_cache(
         timings.append(result["elapsed_seconds"])
         actual = {
             "shape": list(result["visual_features"].shape),
-            "tokens_per_camera": result["visual_features"].shape[0] // len(CAMERA_KEYS),
+            "tokens_per_camera": result["visual_features"].shape[0] // len(camera_keys),
             "input_devices": result["input_devices"],
             "feature_devices": result["feature_devices"],
         }

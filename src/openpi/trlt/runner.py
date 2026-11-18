@@ -39,6 +39,7 @@ from openpi.trlt.loading import TrainingCollator
 from openpi.trlt.loading import training_loader
 from openpi.trlt.metrics import ActionMetrics
 from openpi.trlt.tracking import TrainingTracker
+from openpi.trlt.tracking import tracking_options
 
 OBSERVATION_FIELDS = (
     "visual_features",
@@ -63,6 +64,8 @@ def _progress(message):
 
 SHARED_PROVENANCE_KEYS = (
     "geometry_hash",
+    "dataset_kind",
+    "tactile_format",
     "revision",
     "dataset_revision",
     "split_hash",
@@ -244,7 +247,14 @@ def _counts(samples, probe):
     if probe:
         return {
             "action": sum(
-                int(np.asarray(row["action_valid_mask"], bool).sum()) * row["action_target"].shape[-1]
+                int(
+                    np.broadcast_to(
+                        np.asarray(row["action_valid_mask"], bool)[..., None]
+                        if np.ndim(row["action_valid_mask"]) == 1
+                        else row["action_valid_mask"],
+                        row["action_target"].shape,
+                    ).sum()
+                )
                 for row in samples
             )
         }
@@ -326,10 +336,17 @@ class ActionProbe(nn.Module):
         return x.reshape((x.shape[0], self.config.horizon, self.config.action_dim))
 
 
+def action_element_mask(valid_mask, target):
+    valid = valid_mask.astype(bool)
+    if valid.ndim == target.ndim - 1:
+        valid = valid[..., None]
+    return jnp.broadcast_to(valid, target.shape)
+
+
 def probe_loss(prediction, target, valid_mask):
-    valid = valid_mask[..., None].astype(bool)
+    valid = action_element_mask(valid_mask, target)
     error = jnp.where(valid, prediction - jax.lax.stop_gradient(target), 0)
-    return jnp.sum(error**2) / jnp.maximum(jnp.sum(valid) * target.shape[-1], 1)
+    return jnp.sum(error**2) / jnp.maximum(jnp.sum(valid), 1)
 
 
 def representation_objective(model, params, batch, denominators, rng, config):
@@ -372,6 +389,11 @@ def _train(
     prefetch_factor=2,
 ):
     jax.config.update("jax_default_matmul_precision", "highest")
+    tracking = tracking_options(tracking)
+    if config.batch_size <= 0 or (
+        not probe and (config.microbatch_size <= 0 or config.batch_size % config.microbatch_size)
+    ):
+        raise ValueError("Effective batch size must be a positive multiple of microbatch size")
     if num_workers < 0 or prefetch_factor < 1:
         raise ValueError("num_workers must be nonnegative and prefetch_factor must be positive")
     if not len(train_dataset) or not len(validation_dataset):
@@ -461,16 +483,29 @@ def _train(
         max_steps=max_steps,
         started_at=time.time(),
     )
+    manifest["tracking"] = tracking
+    manifest["gradient_accumulation_steps"] = (config.batch_size + manifest["microbatch_size"] - 1) // manifest[
+        "microbatch_size"
+    ]
+    manifest["dataset"] = {
+        "kind": resolved_provenance.get("dataset_kind"),
+        "camera_order": resolved_provenance.get("camera_order"),
+        "sensor_order": resolved_provenance.get("sensor_order"),
+        "temporal": resolved_provenance.get("temporal"),
+        "state_dim": first["proprioception"].shape[-1],
+        "action_dim": config.action_dim
+        if probe
+        else len((getattr(train_dataset, "normalization", None) or {}).get("action", {}).get("mean", [])) or None,
+        "visual_feature_shape": list(first["visual_features"].shape[1:]) if "visual_features" in first else None,
+        "tactile_shape": list(first["tactile"].shape[1:]) if "tactile" in first else None,
+    }
+    manifest["representation_model_config"] = identity["model_config"] or resolved_provenance.get("model_config")
     write_json(log_dir / "manifest.json", manifest)
     _progress(
         f"Ready: devices={manifest['parameter_devices']} parameters={manifest['parameter_count']:,} "
         f"batch={config.batch_size} microbatch={manifest['microbatch_size']} "
         f"step={int(state.step)} max_steps={max_steps}; logs={log_dir}"
     )
-    if config.batch_size <= 0 or (
-        not probe and (config.microbatch_size <= 0 or config.batch_size % config.microbatch_size)
-    ):
-        raise ValueError("Effective batch size must be a positive multiple of microbatch size")
     micro_size = config.batch_size if probe else config.microbatch_size
 
     def objective(params, batch, denominators, rng):
@@ -484,7 +519,7 @@ def _train(
                 rngs={"dropout": rng},
             )
             loss = probe_loss(predicted, batch["action_target"], batch["action_valid_mask"])
-            count = jnp.sum(batch["action_valid_mask"]) * config.action_dim
+            count = jnp.sum(action_element_mask(batch["action_valid_mask"], batch["action_target"]))
             return loss * count / jnp.maximum(denominators[0], 1), {"action_loss": loss, "action_count": count}
         return representation_objective(model, params, batch, denominators, rng, model_config)
 
@@ -505,7 +540,7 @@ def _train(
             return (jax.tree.map(jnp.add, accumulated, more), total + value, valid & ok), info
 
         # Scan keeps accumulation sequential and compiles a single gradient body,
-        # rather than unrolling up to eight copies with concurrent activations.
+        # rather than unrolling gradient copies with concurrent activations.
         # A smaller final microbatch is compiled separately, without padding.
         count = len(microbatches)
         same_shape_end = count
@@ -865,6 +900,9 @@ def export_frozen_latents(
             "object",
         ):
             values[key] = np.stack([sample[key] for sample in samples])
+        for key in ("segment_id", "source_episode_id", "source_group", "source_label"):
+            if all(key in sample for sample in samples):
+                values[key] = np.stack([sample[key] for sample in samples])
         values["visual_age_seconds"] = np.asarray(
             [sample["query_timestamp"] - sample["visual_timestamp"] for sample in samples], np.float32
         )
@@ -948,7 +986,11 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
             {"params": params}, batch["z"], batch["proprioception"], batch["visual_age_seconds"], train=False
         )
     )
-    metrics = ActionMetrics(normalization["action"]["mean"], normalization["action"]["std"])
+    metrics = ActionMetrics(
+        normalization["action"]["mean"],
+        normalization["action"]["std"],
+        groups=normalization.get("action_groups"),
+    )
     output = root_path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     original_hash = parameter_hash(params)
@@ -977,11 +1019,21 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
                         "query_timestamp": float(sample["query_timestamp"]),
                         "anchor_frame_index": int(sample["anchor_frame_index"]),
                         "horizon_offset": offset,
-                        "valid": bool(batch["action_valid_mask"][i, offset]),
+                        "valid": bool(np.all(batch["action_valid_mask"][i, offset])),
+                        "action_valid_mask": np.broadcast_to(
+                            batch["action_valid_mask"][i, offset], (config.action_dim,)
+                        ),
                         "gt_action": raw_target[i, offset],
                         "predicted_action": raw_prediction[i, offset],
                         "per_joint_squared_error": (raw_prediction[i, offset] - raw_target[i, offset]) ** 2,
                     }
+                    row.update(
+                        {
+                            key: sample[key]
+                            for key in ("segment_id", "source_episode_id", "source_group", "source_label")
+                            if key in sample
+                        }
+                    )
                     handle.write(json.dumps(row, default=_json, allow_nan=False) + "\n")
     if parameter_hash(params) != original_hash:
         raise AssertionError("Probe mutated during evaluation")

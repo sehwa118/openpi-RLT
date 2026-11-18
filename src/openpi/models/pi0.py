@@ -285,6 +285,7 @@ class Pi0(_model.BaseModel):
         *,
         train: bool = False,
         image_only: bool = False,
+        image_keys: tuple[str, ...] = _model.IMAGE_KEYS,
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"]]:
         """Extract post-transformer prefix embeddings for RLT encoder input.
 
@@ -295,7 +296,9 @@ class Pi0(_model.BaseModel):
             image_only: If True, return only image token embeddings (drop language tokens).
                 Per RLT paper: "we drop language embeddings in this step" for fixed-instruction tasks.
         """
-        observation = _model.preprocess_observation(rng if train else None, observation, train=train)
+        observation = _model.preprocess_observation(
+            rng if train else None, observation, train=train, image_keys=image_keys
+        )
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
 
         # Image tokens come first, language tokens follow.

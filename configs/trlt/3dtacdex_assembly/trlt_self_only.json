@@ -1,0 +1,76 @@
+{
+  "model": {
+    "mode": "trlt_self_only",
+    "input_dim": 2048,
+    "embed_dim": 512,
+    "num_heads": 8,
+    "num_stages": 4,
+    "rlt_encoder_layers": 2,
+    "decoder_layers": 2,
+    "mlp_ratio": 4.0,
+    "dropout_rate": 0.0,
+    "num_sensors": 8,
+    "tactile_channels": 3,
+    "tactile_resolution": 1,
+    "history_frames": 3,
+    "state_dim": 22,
+    "num_cameras": 2,
+    "cnn_channels": [
+      32,
+      64,
+      128
+    ],
+    "lambda_visual": 1.0,
+    "lambda_tactile": 1.0,
+    "geometry_available": false,
+    "tactile_format": "taxels",
+    "num_taxels": 15,
+    "use_modality_embedding": false
+  },
+  "temporal": {
+    "fps": 5.0,
+    "visual_refresh_frames": 3,
+    "query_stride_frames": 1,
+    "tactile_history_frames": 3,
+    "tactile_history_stride_frames": 1,
+    "action_horizon_frames": 3,
+    "max_observation_lag_seconds": 0.3
+  },
+  "representation": {
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "batch_size": 64,
+    "microbatch_size": 64,
+    "max_epochs": null,
+    "patience": null,
+    "gradient_clip": 1.0,
+    "max_steps": 8000
+  },
+  "probe": {
+    "hidden_dim": 256,
+    "depth": 2,
+    "action_dim": 22,
+    "horizon": 3,
+    "dropout_rate": 0.0,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 256,
+    "max_epochs": 100,
+    "patience": 10
+  },
+  "split_seed": 42,
+  "training_seeds": [
+    0
+  ],
+  "data_root": "datasets/3dtacdex_assembly/lerobot_all",
+  "backbone_checkpoint": "checkpoints/openpi-assets/checkpoints/pi05_base/params",
+  "dataset_kind": "3dtacdex_assembly",
+  "protocol_dir": "datasets/3dtacdex_assembly/protocol",
+  "visual_cache": "datasets/3dtacdex_assembly/visual_cache",
+  "tracking": {
+    "mode": "online",
+    "project": "trlt",
+    "entity": "rnsrns118-seoul-national-university",
+    "log_every_steps": 10
+  }
+}
