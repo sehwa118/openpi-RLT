@@ -2,8 +2,9 @@
 
 이 문서는 [완료된 Assembly 변환](3dtacdex_assembly.md)을 사용하는 **별도 데이터셋 내 비교**다.
 T-Rex와 같은 Stage A → frozen latent → Stage B → final test 절차를 사용한다.
-본 학습·최종 test 평가는 아직 시작하지 않았다.2026-11-18 사용자 승인으로 실제 train/validation
-일부 샘플의 bounded GPU 검증을 완료했으며, 결과는 아래 최신 검증 보고서에 기록한다.
+2026-11-18 사용자 최종 검토·승인 후34단계 실험 큐를 시작했다.
+실제 현재 단계는 아래 launch 기록의 status/progress/log 경로에서 확인한다.
+별도 bounded GPU 검증 결과는 최신 검증 보고서에 기록되어 있다.
 
 ## 비교 대상
 
@@ -187,11 +188,11 @@ source/config SHA256도 기록한다. 실제 실행 담당자는 실행 전 이 
 변경/실패/GPU 점유가 있으면 중단해야 한다. 자동 resume/retry는 없다.
 GPU preflight는 각 모델에서 full-shape optimizer1update와 전체 validation을 수행한다.
 `--max-steps 1`과 별도 preflight checkpoint/log 경로를 사용하므로 본 학습과 섞이지 않는다.
-생성 계획 전체와 본 학습은 아직 미실행이다. 별도 bounded GPU 검증의 실제 결과는 최신 보고서를 참조한다.
+생성된34단계 계획은 사용자 승인으로2026-11-18에 실행을 시작했다. 별도 bounded GPU 검증의 실제 결과는 최신 보고서를 참조한다.
 본 실험 Stage A/B의 W&B는 config에서 online으로 설정하며,
 `rnsrns118-seoul-national-university/trlt`에 기록한다. GPU preflight는 명시적으로 W&B disabled,
 GPU 검증 run은 offline으로 동작한다. 별도 검증용 run 하나에 최소 설정과 실제 probe 지표2개를
-온라인 기록하고 API 재조회까지 확인했다. 본 실험의8,000-step 학습은 시작하지 않았다.
+온라인 기록하고 API 재조회까지 확인했다. 실제 본 실험의 단계별 시작/완료는 run status/events에 기록한다.
 
 기본 설정은 `configs/trlt/3dtacdex_assembly/{rlt_original,trlt_self_only,trlt_cross_only,trlt_alternating}.json`.
 독립 명령은 `scripts/tacdex_offline.py`의 `train-representation`, `export-latents`,
@@ -231,3 +232,69 @@ GPU0 RTX PRO6000에서 네 full-size 모델의 batch64/micro64/accumulation1 opt
 validation4queries가 통과했다. 추가 frozen latent/probe12updates 검증에서 실제 train W&B 기록은
 step10에만 남았다. 별도 [온라인 로깅 검증 run](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/9c6s4a63)은
 본 실험 결과가 아닌 기존 bounded 검증 지표의 수신 확인용이다.
+
+
+## 승인된 본 실험 실행 시작: 2026-11-18
+
+승인된 계획과 현재 source/config/input hash가 일치함을 확인한 후,
+2026-11-18T01:23:03Z에34단계 큐를 시작했다. GPU0는 시작 전 idle이었다.
+초기 관측은 protocol 재사용 완료 후 train 시각 특징 추출(stage2/34) 시작이다.
+optimizer step/이후 단계 완료를 이 초기 관측으로 추정하지 않는다.
+
+Run ID: `assembly_8k_fullb64_wandb10_seed0_20261118_prepared`.
+[실행 디렉터리](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_wandb10_seed0_20261118_prepared/),
+[status](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_wandb10_seed0_20261118_prepared/status.json),
+[progress](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_wandb10_seed0_20261118_prepared/progress.json).
+계획의 `_prepared` run ID는 그대로 보존했으며, 원래 plan의 준비 상태 표기 대신 실제 run status를 확인한다.
+
+Tmux socket=`trlt-runs`, session=`trlt-assembly-8k-seed0`, windows=`train`,`reports`.
+별도 승인된34단계를 순차 실행하고 source/config/input 변경, 점유된 GPU, 단계 실패 시 중단한다.
+자동 retry/resume는 없으며, 이미 시작한 큐를 중복 실행하지 않는다.
+8개 main W&B run은 각 Stage A/B 시작 시 생성된다. 현재 단계를 확인하지 않고
+feature 추출/학습/최종 평가를 별도로 다시 시작하지 않는다.
+
+
+## 사용자 요청에 따른 feature 추출 최적화 및 재시작: 2026-11-18
+
+사용자가 기존 실행 중단과 방금 생성된 cache 삭제를 명시적으로 요청했다.
+이전 큐는 `cache_train` 단계에서 중단했으며, 해당 shared cache78anchors/327361813bytes를
+삭제했다. 원본 변환, split/정규화, 기존 bounded validation cache와 완료된 T-Rex 결과는 보존했다.
+
+새 feature 설정은 **입력/vision batch32, Gemma prefix microbatch1, CPU workers2,
+prefetch factor2**다. 각 worker가 episode 단위로 두 영상을 한 번씩 열어 순차 디코딩한다.
+원래 uint8→float32 scaling/GPU resize와 정확한 source row·timestamp를 유지한다.
+마지막 불완전 배치는 마지막 입력으로 padding하고 실제 anchor 수만 저장한다.
+학습의 batch64/micro64/accumulation1 설정과는 별도다.
+
+그대로 batched Gemma를 호출하면 batch1 대비 relative L2약2.85% 차이가 나 고정 기준을
+통과하지 못했다. 진단상 resize/vision/prefix 입력은 동일했고 Gemma 이후 차이가 발생했다.
+따라서 image encoder는 batch 처리하되 Gemma는 JIT loop 안에서 batch1 산술을 유지한다.
+이 hybrid의32-anchor 비교 relative L2는9.39e-6(약0.00094%), cosine최소0.9999999996이다.
+기존 저장 batch1 cache16anchors도 각 relative L2<1e-4로 통과했다. 정확한 bit equality를
+주장하지 않으며, batch/reader/prefix 방식은 새 cache identity에 기록해 구방식과 혼용하지 않는다.
+
+Train-only 측정32anchors: CPU repeated-seek11.47초→sequential2.57초(약4.46배).
+메모리에 준비된 입력의 GPU forward는 batch1약5.21→hybrid batch32약7.79anchors/s.
+이 수치는 전체 추출 완료 처리량이 아니며 실제 data wait/write 포함 결과는 extraction report에 남긴다.
+실제64anchor의worker2→GPU→cache 저장, tail padding, mask/key/timestamp/수치 기준이 통과했다.
+CPU11tests passed(선택 회귀7deselected). 증거:
+`experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/report.md`.
+
+새 run ID는 `assembly_8k_fullb64_batched_seed0_20261118`, tmux session은
+`trlt-assembly-batched-seed0`(socket`trlt-runs`)이다. shared cache가 비어 있음을 확인하고
+새 source/config snapshot으로34단계 큐를 시작했다. 기존 승인한 학습·최종 평가 조건은 그대로다.
+이전 run은 `STOPPED_BY_USER`/`superseded.json`으로 보존한다. 현재 실행 상태:
+[status](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/status.json),
+[progress](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/progress.json).
+
+
+재추출 완료 확인 (2026-11-18 02:10 UTC): train **4,973 anchors**, validation
+**1,162 anchors**, 합계 **6,135 anchors**가 새 공유 캐시에 저장됐다. 실제 추출·저장
+구간은 각각 736.35초 / 177.17초 (6.754 / 6.559 anchors/s)였다. Backbone 로딩은
+각 split 보고서의 별도 총 시간 필드에 기록된다. 전체 키가 고정 split과 정확히
+일치하고 test 키는 0개임을 확인했다. 캐시 해시는
+`abb20dc6ecb8e7979aea11e8d6330837c9e5fc624aff3cc09b34a005765b4c1e`다.
+[완료 검증](../../experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/production_cache_validation.json),
+[실행 보고서](../../experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/report.md).
+큐는 이 확인 시점에 stage 4/34 `rlt_original_gpu_preflight`로 진행했으며,
+본 학습 및 최종 평가는 후속 단계다. 현재 진행은 새 run의 실제 status/log를 확인한다.

@@ -18,7 +18,8 @@ from openpi.trlt.config import root_path
 
 
 class FrozenPrefixExtractor:
-    def __init__(self, checkpoint, *, max_token_len=200, camera_keys=CAMERA_KEYS):
+    def __init__(self, checkpoint, *, max_token_len=200, camera_keys=CAMERA_KEYS, prefix_microbatch_size=None):
+        self.prefix_microbatch_size = prefix_microbatch_size
         self.camera_keys = tuple(camera_keys)
         os.environ.setdefault("OPENPI_DATA_HOME", str(root_path("checkpoints")))
         import flax.nnx as nnx
@@ -47,7 +48,12 @@ class FrozenPrefixExtractor:
         # Existing NNX/Linen bridge remains the sole backbone implementation.
         self.forward = nnx.jit(
             lambda model, obs: model.extract_prefix_embeddings(
-                jax.random.key(0), obs, train=False, image_only=True, image_keys=self.camera_keys
+                jax.random.key(0),
+                obs,
+                train=False,
+                image_only=True,
+                image_keys=self.camera_keys,
+                prefix_microbatch_size=self.prefix_microbatch_size,
             )
         )
         state = nnx.state(self.model, nnx.Param)
@@ -59,44 +65,65 @@ class FrozenPrefixExtractor:
             "parameter_devices": sorted({str(device) for x in leaves for device in x.devices()}),
         }
 
-    def prepare_visual_context(self, anchor):
+    def prepare_visual_batch(self, anchors, *, pad_to=None):
         import jax
         import jax.numpy as jnp
 
         from openpi.models.model import Observation
 
-        images = anchor["images"]
-        if tuple(images) != self.camera_keys:
-            raise ValueError(f"Camera order/mapping mismatch: {tuple(images)}")
-        prompt, prompt_mask = self.tokenizer.tokenize(anchor["caption"], state=None)
-        # Prefix-only embed_prefix reads images and caption, never Observation.state.
-        # This placeholder is not truncated T-Rex state and is never probe input.
+        count = len(anchors)
+        if not count or (pad_to is not None and pad_to < count):
+            raise ValueError("Invalid feature batch/padding")
+        padded = list(anchors) + [anchors[-1]] * ((pad_to or count) - count)
+        if any(tuple(anchor["images"]) != self.camera_keys for anchor in padded):
+            raise ValueError("Camera order/mapping mismatch")
+        tokenized = [self.tokenizer.tokenize(anchor["caption"], state=None) for anchor in padded]
+        prompts = np.stack([item[0] for item in tokenized]).astype(np.int32)
+        prompt_masks = np.stack([item[1] for item in tokenized])
+        # Keep original uint8->float32 scaling and GPU resize; no PIL/CPU resampling.
         observation = Observation.from_dict(
             {
-                "image": {name: np.asarray(images[name], np.uint8)[None] for name in self.camera_keys},
-                "image_mask": {name: np.ones((1,), bool) for name in self.camera_keys},
-                "state": np.zeros((1, self.config.action_dim), np.float32),
-                "tokenized_prompt": prompt[None].astype(np.int32),
-                "tokenized_prompt_mask": prompt_mask[None],
+                "image": {
+                    key: np.stack([np.asarray(a["images"][key], np.uint8) for a in padded]) for key in self.camera_keys
+                },
+                "image_mask": {key: np.ones(len(padded), bool) for key in self.camera_keys},
+                "state": np.zeros((len(padded), self.config.action_dim), np.float32),
+                "tokenized_prompt": prompts,
+                "tokenized_prompt_mask": prompt_masks,
             }
         )
         start = time.perf_counter()
-        features, mask = self.forward(self.model, jax.tree.map(jnp.asarray, observation))
+        device_observation = jax.tree.map(jnp.asarray, observation)
+        features, mask = self.forward(self.model, device_observation)
         features.block_until_ready()
         elapsed = time.perf_counter() - start
-        if features.shape[1] % len(self.camera_keys) != 0:
+        if features.shape[1] % len(self.camera_keys):
             raise ValueError("Image token count does not cover requested cameras")
         return {
-            "input_devices": sorted(
-                {str(d) for x in jax.tree.leaves(jax.tree.map(jnp.asarray, observation)) for d in x.devices()}
-            ),
+            "input_devices": sorted({str(d) for x in jax.tree.leaves(device_observation) for d in x.devices()}),
             "feature_devices": sorted(str(d) for d in features.devices()),
-            "visual_features": np.asarray(features[0], np.float32),
-            "visual_valid_mask": np.asarray(mask[0], bool),
+            "visual_features": np.asarray(features[:count], np.float32),
+            "visual_valid_mask": np.asarray(mask[:count], bool),
             "elapsed_seconds": elapsed,
-            "caption_tokenization_hash": digest(
-                {"caption": anchor["caption"], "tokens": prompt.tolist(), "mask": prompt_mask.tolist()}
-            ),
+            "caption_tokenization_hashes": [
+                digest(
+                    {"caption": anchors[i]["caption"], "tokens": prompts[i].tolist(), "mask": prompt_masks[i].tolist()}
+                )
+                for i in range(count)
+            ],
+        }
+
+    def prepare_visual_context(self, anchor):
+        result = self.prepare_visual_batch([anchor])
+        return {
+            **{
+                key: value
+                for key, value in result.items()
+                if key not in ("visual_features", "visual_valid_mask", "caption_tokenization_hashes")
+            },
+            "visual_features": result["visual_features"][0],
+            "visual_valid_mask": result["visual_valid_mask"][0],
+            "caption_tokenization_hash": result["caption_tokenization_hashes"][0],
         }
 
 
@@ -116,7 +143,16 @@ def extract_visual_cache(
     episode_ids=None,
     force=False,
     plan_only=False,
+    batch_size=1,
+    num_workers=0,
+    prefetch_factor=2,
+    prefix_microbatch_size=None,
 ):
+    total_start = time.perf_counter()
+    if prefix_microbatch_size not in (None, 1):
+        raise ValueError("Only prefix_microbatch_size=1 or None is supported")
+    if batch_size < 1 or num_workers < 0 or prefetch_factor < 1:
+        raise ValueError("Invalid feature batch/worker/prefetch options")
     temporal = temporal or TemporalConfig()
     # Enumerate only query-reachable anchors; this is the identical schedule used by all models.
     selected = set(map(int, episode_ids)) if episode_ids else None
@@ -140,6 +176,10 @@ def extract_visual_cache(
         "estimated_shape": [tokens, 2048],
         "estimated_float32_bytes": len(keys) * (tokens * 2048 * 4 + tokens),
         "plan_only": plan_only,
+        "prefix_microbatch_size": prefix_microbatch_size,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "prefetch_factor": prefetch_factor,
     }
     destination = root_path(output_dir)
     ancestor = destination
@@ -159,7 +199,10 @@ def extract_visual_cache(
         return estimate
     if estimate["estimated_new_bytes"] * 1.05 > estimate["available_disk_bytes"]:
         raise ValueError("Insufficient disk space for planned visual cache; no backbone initialized")
-    extractor = FrozenPrefixExtractor(backbone_checkpoint, camera_keys=camera_keys)
+    extractor_options = {"camera_keys": camera_keys}
+    if prefix_microbatch_size is not None:
+        extractor_options["prefix_microbatch_size"] = prefix_microbatch_size
+    extractor = FrozenPrefixExtractor(backbone_checkpoint, **extractor_options)
     caption_hash = dataset.provenance["caption_hash"]
     metadata = feature_metadata(
         revision=revision,
@@ -171,6 +214,28 @@ def extract_visual_cache(
         camera_order=getattr(dataset, "camera_order", None),
         camera_keys=camera_keys,
     )
+    if batch_size > 1 or num_workers > 0:
+        metadata["extraction"] = {
+            "version": "batched_anchor_v1",
+            "prefix_microbatch_size": prefix_microbatch_size,
+            "fixed_batch_size": batch_size,
+            "tail": "repeat_last_then_discard",
+            "reader": "sequential_native_mp4" if hasattr(dataset, "iter_anchors") else "anchor_reader",
+            "preprocessing": "original_float32_scale_and_gpu_resize",
+        }
+        return _extract_batched(
+            dataset,
+            keys,
+            extractor,
+            output_dir,
+            metadata,
+            estimate,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+            force=force,
+            total_start=total_start,
+        )
     cache = FeatureCache.create(output_dir, metadata, force=force)
     timings = []
     actual = None
@@ -207,3 +272,93 @@ def extract_visual_cache(
     }
     write_json(root_path(output_dir) / "extraction_report.json", result)
     return result
+
+
+def _extract_batched(
+    dataset,
+    keys,
+    extractor,
+    output_dir,
+    metadata,
+    estimate,
+    *,
+    batch_size,
+    num_workers,
+    prefetch_factor,
+    force,
+    total_start,
+):
+    from tqdm.auto import tqdm
+
+    from openpi.trlt.feature_loading import anchor_loader
+
+    cache = FeatureCache.create(output_dir, metadata, force=force)
+    missing = [key for key in keys if key not in cache]
+    seen = set()
+    timings = []
+    data_seconds = write_seconds = 0.0
+    actual = None
+    started = time.perf_counter()
+    with (
+        anchor_loader(
+            dataset, missing, batch_size=batch_size, num_workers=num_workers, prefetch_factor=prefetch_factor
+        ) as batches,
+        tqdm(total=len(missing), desc="Frozen anchor features", unit="anchor") as bar,
+    ):
+        while True:
+            before = time.perf_counter()
+            try:
+                samples = next(batches)
+            except StopIteration:
+                break
+            data_seconds += time.perf_counter() - before
+            batch_keys = [tuple(key) for key, _ in samples]
+            if any(key in seen for key in batch_keys) or len(batch_keys) != len(set(batch_keys)):
+                raise ValueError("Duplicate anchor from feature workers")
+            result = extractor.prepare_visual_batch([anchor for _, anchor in samples], pad_to=batch_size)
+            if result["visual_features"].shape[0] != len(samples):
+                raise ValueError("Padded output count differs from actual anchors")
+            before = time.perf_counter()
+            for index, (key, anchor) in enumerate(samples):
+                cache.put(
+                    key,
+                    result["visual_features"][index],
+                    result["visual_valid_mask"][index],
+                    caption_hash=result["caption_tokenization_hashes"][index],
+                    visual_timestamp=anchor["visual_timestamp"],
+                    camera_timestamps=anchor["camera_timestamps"],
+                )
+                seen.add(tuple(key))
+            write_seconds += time.perf_counter() - before
+            timings.append(result["elapsed_seconds"])
+            actual = {
+                "shape": list(result["visual_features"].shape[1:]),
+                "tokens_per_camera": result["visual_features"].shape[1] // len(extractor.camera_keys),
+                "input_devices": result["input_devices"],
+                "feature_devices": result["feature_devices"],
+            }
+            bar.update(len(samples))
+            bar.set_postfix(batch=batch_size, data_s=f"{data_seconds:.1f}", gpu_s=f"{sum(timings):.1f}")
+    if seen != set(missing):
+        raise ValueError("Missing/unexpected anchor keys from feature workers")
+    elapsed = time.perf_counter() - started
+    report = {
+        **estimate,
+        "plan_only": False,
+        "cache_hash": cache.cache_hash,
+        "written": len(seen),
+        "available_anchors": len(cache.keys()),
+        "backbone_placement": extractor.placement,
+        "actual_features": actual,
+        "batches": len(timings),
+        "elapsed_seconds": elapsed,
+        "total_seconds_including_backbone_load": time.perf_counter() - total_start,
+        "anchors_per_second": len(seen) / elapsed if elapsed else None,
+        "data_wait_seconds": data_seconds,
+        "forward_seconds": sum(timings),
+        "write_seconds": write_seconds,
+        "first_call_seconds_including_compile": timings[0] if timings else None,
+        "subsequent_call_seconds": timings[1:],
+    }
+    write_json(root_path(output_dir) / "extraction_report.json", report)
+    return report

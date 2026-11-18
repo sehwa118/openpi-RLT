@@ -169,3 +169,28 @@ update at64/64/1 +4validation queries; alternating frozen export/probe12updates
 also passed. Actual offline records and a single minimal online verification run
 were checked through the remote API.28latest CPU testcase outcomes and28CLI dry
 runs passed. These bounded results do not mean the8000-step plan was launched.
+
+User-authorized full Assembly experiment launched2026-11-18T01:23:03Z under
+`experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_wandb10_seed0_20261118_prepared/`.
+The earlier bounded validation remains separate evidence. Initial observation:
+protocol reused, train feature extraction started. Use current status/progress,
+stage logs and actual saved checkpoints for later execution claims. No duplicated
+queue or implicit resume is authorized by the launch record.
+
+Optimized Assembly feature restart (2026-11-18): user stopped the initial queue and
+requested deleting78fresh shared cache anchors. Sequential exact-row CPU decode,
+spawned prefetch and batch32vision/stable batch1Gemma extraction passed11CPUtests
+and a real64anchor GPU/cache pipeline check; sixteen historical batch1 anchors
+match withinrelative L2<1e-4. Direct batched-Gemma numerical mismatch was retained
+and rejected. Evidence: `experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/`.
+New34-stage run: `assembly_8k_fullb64_batched_seed0_20261118`; consult its actual
+status/logs/extraction reports for production completion, not the benchmark.
+
+
+- Production re-extraction completed and verified at 2026-11-18 02:10 UTC:
+  train 4,973 + validation 1,162 = 6,135 anchors; exact expected key sets,
+  no test keys, matching cache identity, eight distributed shape/finite/mask
+  sample checks passed. Full-stage extraction/write rates: 6.754 / 6.559 anchors/s.
+  See [production audit](../../experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/production_cache_validation.json)
+  and split reports linked from its optimization report. Queue had advanced to
+  stage 4/34 RLT GPU preflight; this is not a main-training completion claim.

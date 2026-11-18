@@ -21,6 +21,10 @@ def main():
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--force-cache-rebuild", action="store_true")
     parser.add_argument("--selection-seal")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--prefix-microbatch-size", type=int, choices=(1,))
+    parser.add_argument("--num-workers", type=int)
+    parser.add_argument("--prefetch-factor", type=int)
     args = parser.parse_args()
     os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device if args.extract and not args.plan_only else ""
@@ -76,6 +80,18 @@ def main():
         episode_ids=args.episode_ids,
         force=args.force_cache_rebuild,
         plan_only=not args.extract or args.plan_only,
+        prefix_microbatch_size=args.prefix_microbatch_size
+        if args.prefix_microbatch_size is not None
+        else config.get("feature_extraction", {}).get("prefix_microbatch_size"),
+        batch_size=args.batch_size
+        if args.batch_size is not None
+        else config.get("feature_extraction", {}).get("batch_size", 1),
+        num_workers=args.num_workers
+        if args.num_workers is not None
+        else config.get("feature_extraction", {}).get("num_workers", 0),
+        prefetch_factor=args.prefetch_factor
+        if args.prefetch_factor is not None
+        else config.get("feature_extraction", {}).get("prefetch_factor", 2),
     )
     print(json.dumps(result, indent=2))
 

@@ -5,6 +5,7 @@ frame continuity checks. Video PTS is used only to locate that row's RGB pixels.
 """
 
 from collections import defaultdict
+from contextlib import ExitStack
 from dataclasses import asdict
 from functools import lru_cache
 import json
@@ -384,6 +385,52 @@ class AssemblyDataset:
             "visual_timestamp": timestamp,
             "camera_timestamps": [timestamp] * 2,
         }
+
+    def iter_anchors(self, episode, anchors):
+        """Decode each camera once from row0, yielding only exact requested rows."""
+        import av
+
+        anchors = list(anchors)
+        if not anchors or anchors != sorted(set(anchors)) or anchors[0] < 0:
+            raise ValueError("Anchor indices must be nonempty, unique, sorted and nonnegative")
+        ep = self._episode(episode)
+        if anchors[-1] >= len(ep["source.elapsed_seconds"]):
+            raise IndexError("Anchor outside source segment")
+        with ExitStack() as stack:
+            streams = {}
+            for camera, key in zip(CAMERAS, CAMERA_KEYS, strict=True):
+                container = stack.enter_context(av.open(str(video_path(self.root, episode, camera))))
+                stream = container.streams.video[0]
+                stream.codec_context.thread_count = 2
+                streams[key] = iter(container.decode(stream))
+            previous = dict.fromkeys(CAMERA_KEYS, -1)
+            for anchor in anchors:
+                images = {}
+                for key in CAMERA_KEYS:
+                    for frame in streams[key]:
+                        if frame.pts is None:
+                            raise ValueError("Missing video PTS")
+                        row = round(float(frame.time) * 5)
+                        if row != previous[key] + 1 or abs(float(frame.time) - row / 5) > 1e-6:
+                            raise ValueError("Noncontiguous/misaligned native video PTS")
+                        previous[key] = row
+                        if row == anchor:
+                            images[key] = frame.to_ndarray(format="rgb24")
+                            break
+                        if row > anchor:
+                            raise ValueError("Missing requested source video row")
+                    if key not in images:
+                        raise ValueError("Truncated video before requested anchor")
+                stamp = float(ep["source.elapsed_seconds"][anchor])
+                yield (
+                    (episode, anchor),
+                    {
+                        "images": images,
+                        "caption": str(ep["source.instruction"][anchor]),
+                        "visual_timestamp": stamp,
+                        "camera_timestamps": [stamp] * 2,
+                    },
+                )
 
     def __getitem__(self, index):
         eid, q = self.queries[index]

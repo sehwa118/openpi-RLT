@@ -457,3 +457,81 @@ This is a historical handoff, not a live process-status report. Verify later art
   Older micro4 plans are superseded. Evidence/commands/configs/logs:
   `experiments/trlt/3dtacdex_assembly/revisions/20261118_full_b64_wandb10/report.md`.
   Bounded validation did not authorize an8000-step launch or final test evaluation.
+
+### User-authorized Assembly experiment launch: 2026-11-18
+
+- User reviewed the final plan and explicitly requested starting the experiment.
+  Approved scope: all34stages,4models,seed0; Stage A8000updates/batch64/micro64/
+  accumulation1, no modality embedding; Stage B defaults; online W&B every10
+  train steps; validation-based selection and sealed final test evaluation.
+- Launched at2026-11-18T01:23:03Z, GPU0, tmux socket `trlt-runs`, session
+  `trlt-assembly-8k-seed0`, windows `train` and `reports`. Run ID:
+  `assembly_8k_fullb64_wandb10_seed0_20261118_prepared`.
+  Run root: `experiments/trlt/3dtacdex_assembly/runs/<run_id>/`.
+  Active indices: `experiments/trlt/assembly_active_run.json`, dataset-local
+  `active_run.json`, and global `experiments/trlt/active_run.json`; prior global
+  index is preserved in the run folder. Earlier completed experiment files stay.
+- Initial actual observation: protocol reuse completed (stage1/34); stage2
+  `cache_train` started with a live CUDA Python process. This is a launch-time
+  observation, not a claim of any later optimizer update or completion.
+  Inspect actual `status.json`, `progress.json`, `events.jsonl`/`events.log`,
+  `current_process.json`, stage logs, W&B identities and live processes first.
+- Run files include `approved_plan.json`, config/source snapshots (113files),
+  `launch_manifest.json`, exact command argv, authorization and source/input hashes.
+  Stage order: shared train/val features;4preflights;4Stage A/export train+val/
+  Stage B pipelines;seal;shared test features;4test exports/evaluations;summary.
+  Fresh model initialization; no resume. Never duplicate this queue.
+- Parent/observer remain CPU-only. Each GPU command checks GPU0 is idle first.
+  Source/config/protocol/converted-input/backbone changes or any failing stage
+  stop the next launch; no automatic retry/resume. Per-run locks prevent duplicate
+  launches. Other users' jobs are never stopped. A source edit needs actual
+  checkpoint/provenance inspection before recovery, not a blind restart.
+- Checkpoints: `checkpoints/trlt/3dtacdex_assembly/<run_id>/`; latents:
+  `datasets/3dtacdex_assembly/latents/<run_id>/`. W&B:
+  `rnsrns118-seoul-national-university/trlt`,8main runs grouped by run ID.
+  Training W&B starts at main Stage A; feature/preflight stages do not create
+  main training runs. Final outputs include `final_report.md`, `summary.json`,
+  `summary.csv`, `comparison_validation.json` and sealed selections.
+
+### Optimized Assembly feature extraction restart: 2026-11-18
+
+- User explicitly requested stopping current extraction/queue, deleting the freshly
+  produced shared cache and optimizing/re-extracting. Old queue
+  `assembly_8k_fullb64_wandb10_seed0_20261118_prepared` stopped at stage2/cache_train.
+  Deleted78anchors/327361813bytes from `datasets/3dtacdex_assembly/visual_cache/`.
+  Old logs/status/snapshots and all source/protocol/normalization remain preserved.
+- Added `src/openpi/trlt/feature_loading.py` (spawned CPU iterable DataLoader),
+  `AssemblyDataset.iter_anchors` (each episode/camera opened once, sequential exact
+  native rows), batched prefix API in features.py and explicit CLI feature knobs.
+- Four configs use feature batch32, prefix_microbatch_size1, workers2/prefetch2.
+  Image encoding/transfer is batched; Gemma uses JIT-mapped batch1 arithmetic.
+  Fully batched Gemma differed from batch1 by2.85% relative L2 and was rejected.
+  Hybrid measured relative L2=9.39e-6/cosine>=0.9999999996 over32train anchors;
+  sixteen saved batch1 references each satisfyrelative L2<1e-4. RGB/masks/times
+  remain exact. Cache identity records extraction algorithm/fixed batch/prefix;
+  do not mix legacy and optimized chunks. Legacy default1/0worker path is kept.
+- Actual CPU11tests passed; real64anchor worker2/GPU/cache/tail path passed.
+  Train-only decoder benchmark11.47s→2.57s for32anchors; GPU prepared-input
+  throughput5.21→7.79anchors/s. Full-stage throughput must come from actual logs.
+  Evidence/commands: `experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/`.
+- New run `assembly_8k_fullb64_batched_seed0_20261118`, source snapshot115files,
+  launched2026-11-18T01:53:50Z. Tmux socket`trlt-runs`, session
+  `trlt-assembly-batched-seed0`, train/reports windows. Active indices point here.
+  Earlier run is STOPPED_BY_USER/superseded; do not restart or duplicate it.
+- New queue begins from empty shared cache. Existing authorized four-model
+  Stage A8000/batch64/micro64, Stage B, W&B10, fixed split and final test protocol
+  remain unchanged. Inspect new status/progress/events and actual extraction
+  reports before claiming train/validation features or optimizer runs completed.
+
+
+- Optimized production train/validation extraction actually completed, verified
+  2026-11-18 02:10 UTC: 4,973 + 1,162 = 6,135 fresh anchors; exact saved-protocol
+  key sets, no test keys, matching metadata identity and eight distributed
+  shape/finite/mask samples passed. Cache hash:
+  `abb20dc6ecb8e7979aea11e8d6330837c9e5fc624aff3cc09b34a005765b4c1e`.
+  Full-stage extraction/write rates 6.754 / 6.559 anchors/s (backbone load separate).
+  Evidence: `feature_optimization_20261118/production_cache_validation.json`
+  and run `feature_extraction_{train,validation}.json`, under the Assembly paths
+  above. Queue advanced to stage 4/34 `rlt_original_gpu_preflight`; inspect live
+  status before reporting any later training/evaluation. Do not rebuild the
+  completed shared cache or duplicate/restart the queue.

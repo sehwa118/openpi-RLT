@@ -72,5 +72,11 @@
     "project": "trlt",
     "entity": "rnsrns118-seoul-national-university",
     "log_every_steps": 10
+  },
+  "feature_extraction": {
+    "batch_size": 32,
+    "prefix_microbatch_size": 1,
+    "num_workers": 2,
+    "prefetch_factor": 2
   }
 }
