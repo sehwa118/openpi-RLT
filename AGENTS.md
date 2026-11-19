@@ -535,3 +535,115 @@ This is a historical handoff, not a live process-status report. Verify later art
   above. Queue advanced to stage 4/34 `rlt_original_gpu_preflight`; inspect live
   status before reporting any later training/evaluation. Do not rebuild the
   completed shared cache or duplicate/restart the queue.
+
+
+### Completed Assembly four-model experiment: verified 2026-11-19 UTC
+
+- Run `assembly_8k_fullb64_batched_seed0_20261118` completed all 34 stages
+  at 2026-11-18T16:11:22Z, including all four final test evaluations. All Stage A
+  last checkpoints contain 8000 updates; selected A steps are 8000/7888/7656/8000.
+  Final seed0 normalized source-trajectory macro MSE: RLT 0.059761459, self
+  0.092136257, cross 0.090131010, alternating 0.085491817. TRLT errors exceed
+  RLT by 54.17% / 50.82% / 43.06%; all paired trajectory-bootstrap 95% delta
+  intervals are positive. Only seed0 was requested; training-seed variation
+  remains unmeasured. This is offline prediction, not online control success.
+- Same 16 original test trajectories and per-trajectory valid counts; 248112
+  valid elements/model. Primary means, common protocol/cache provenance and
+  test-after-selection timing were verified. Evidence in the run directory:
+  `final_report.md`, `summary.json`, `summary.csv`, `comparison_validation.json`,
+  `final_selections.json`, `results_review.json`, per-model evaluation files.
+  Korean results and limitations: `docs/trlt/3dtacdex_experiments.md`.
+- This supersedes earlier preflight/training/test-not-extracted observations.
+  Completed test extraction added 1267 anchors to the shared cache (7402 total).
+  Do not rebuild the completed cache or duplicate/restart the queue. No training,
+  extraction or evaluation was rerun to summarize these results.
+
+
+### User-authorized Assembly self-only 2-layer follow-up: 2026-11-19
+
+- User requested another self-attention-only experiment with 2 fusion layers.
+  Tracked config: `configs/trlt/3dtacdex_assembly/depth/trlt_self_only_2layer.json`;
+  exact previous executed config except `num_stages:4→2`. Seed0, tactile history3,
+  no modality embedding, Stage A8000/batch64/micro64/accumulation1; Stage B and
+  W&B10 unchanged. Existing full visual cache/splits/normalization reused.
+- New run `assembly_self2_8k_fullb64_seed0_20261119T002037Z` launched at
+  2026-11-19T00:22:58Z on GPU0, tmux socket `trlt-runs`, session
+  `trlt-assembly-self2-seed0`, train/reports windows. Active Assembly/global
+  indices and `depth_active_run.json` point here. Nine explicit stages: GPU
+  preflight, Stage A, train/validation exports, Stage B, selection seal, test
+  export/evaluation, comparison report. No implicit resume/retry; source/config/
+  input/cache changes or a busy GPU stop the next stage. Inspect actual status,
+  logs and saved state before claiming progress or recovery; never duplicate.
+- Seal CLI supports explicit base-selection reuse/replacement; unchanged models
+  retain their old verified records, self-only gets new validation selections.
+  Default four-model test gating is preserved. CPU2tests +7CLI dry runs, baseline
+  hashes and isolated historical-metric report replay passed. Evidence under
+  `experiments/trlt/3dtacdex_assembly/depth_2layer_validation/`.
+- Prior test results were already inspected before this depth follow-up was
+  requested; report it as exploratory. New comparisons label self4/self2
+  separately; historical RLT/self4 results are reused, not retrained. Existing
+  completed runs are retained and should not be restarted or overwritten.
+
+- Actual 2-layer full-shape GPU preflight passed: one optimizer update plus
+  all 3472 validation queries at64/64/1 on GPU0. Main Stage A started fresh
+  at2026-11-19T00:24:55Z; online W&B run `tjyjid6l`. Evidence:
+  run `gpu_preflight_observation.json` and `depth_2layer_validation/summary.json`.
+  This is startup/preflight evidence, not 8000-step or final-test completion.
+
+
+### Completed Assembly self-only 2-layer experiment: verified 2026-11-19
+
+- Run `assembly_self2_8k_fullb64_seed0_20261119T002037Z` completed all 9 stages
+  at 2026-11-19T03:26:42Z, including new final test evaluation. Stage A actually
+  reached8000updates; selected A step7888 / B epoch12 (last B epoch22).
+  Test primary MSE0.081193840: 11.88% below same-setting self4 0.092136257,
+  but35.86% above RLT0.059761459. This is lowest observed TRLT primary error
+  among current Assembly runs, seed0 only. Paired original-trajectory bootstrap
+  95% CI for self2−self4: [-0.016479,-0.005356]; no seed variability measured.
+- Actual configs differ only in fusion depth4→2; all five evaluated settings
+  share protocol/features and16original test trajectory IDs/counts (248112valid
+  action elements/model). New validation checkpoint selections were sealed
+  before new test export/evaluation. Existing baseline results were reused.
+  Evidence in run: `final_report.md`, `summary.json`, `results_review.json`,
+  `final_selections.json`, raw evaluation files and events. Korean summary:
+  `docs/trlt/3dtacdex_experiments.md`.
+- Supersedes the preflight/startup-only observation. Do not restart/duplicate
+  the completed queue or rebuild features. This depth follow-up was requested
+  after earlier test results were inspected; preserve exploratory provenance.
+  No training/extraction/evaluation was rerun for the results review.
+
+
+### User-authorized Assembly self2 modality-on follow-up: 2026-11-19
+
+- User requested restoring modality embedding with self attention2layers.
+  New config `configs/trlt/3dtacdex_assembly/modality/trlt_self_only_2layer_modality.json`
+  differs from the actual previous self2 config only in
+  `use_modality_embedding:false→true`. Seed0, tactile3, Stage A8000/batch64/
+  micro64/accumulation1, Stage B defaults and W&B10 remain unchanged. Existing
+  splits/train-only normalization/full7402-anchor visual cache are reused.
+- Run `assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z` launched
+  at 2026-11-19T03:50:26.710345+00:00 on GPU0. Tmux socket `trlt-runs`, session
+  `trlt-assembly-self2-modality-seed0`, train/reports windows. Global/Assembly
+  active indices and `modality_active_run.json` point here; `depth_active_run.json`
+  still identifies the completed previous modality-off2 experiment. Nine stages:
+  GPU preflight, Stage A, train/validation exports, Stage B, seal, test export/
+  evaluation, report. Inspect actual status/logs/checkpoints; never duplicate or
+  infer completion from launch. Source/input/config/cache changes, occupied GPU
+  or stage errors stop the queue; no implicit retry/resume.
+- CPU serialization regression1test,7CLI dry runs, historical checkpoint hashes
+  and isolated report replay passed. Evidence under
+  `experiments/trlt/3dtacdex_assembly/modality_2layer_validation/`. Enabled true
+  can be omitted by legacy model-config serialization; check explicit run config
+  and actual `encoder/modality_embed` shape[3,512], not field absence alone.
+- Compare distinct on/off2 labels and historical RLT/self4 without retraining
+  old results. New selections are sealed before new test evaluation. This is
+  a follow-up after prior test inspection, seed0 only; preserve exploratory
+  provenance and do not claim online control success.
+
+- Actual modality-on full-shape GPU preflight passed:1optimizer update and
+  all3472validation queries at64/64/1 on GPU0. Checkpoint contains finite
+  `encoder/modality_embed` shape[3,512]. Main Stage A started fresh at
+  2026-11-19T03:52:34.818280+00:00. Evidence: run
+  `gpu_preflight_observation.json` and `modality_2layer_validation/summary.json`.
+  These are preflight/startup observations; inspect live state for later updates
+  or completion, not this record.

@@ -1,6 +1,7 @@
 """Selection seal rejects incomplete models, mismatched lineage and later edits."""
 
 import json
+import shutil
 
 import pytest
 
@@ -41,6 +42,36 @@ def test_checkpoint_selection_seal_and_mutation(tmp_path):
     seal_selections(checkpoints, path, protocol_dir=directory)
     validate_selection_seal(path, protocol_dir=directory, checkpoint=checkpoints / MODELS[0] / "seed0/probe/best")
     assert seal_selections(checkpoints, path, protocol_dir=directory)["hash"] == json.loads(path.read_text())["hash"]
+    # A depth follow-up trains just one model; other records must remain exact.
+    replacement = tmp_path / "replacement"
+    mode = "trlt_self_only"
+    shutil.copytree(checkpoints / mode, replacement / mode)
+    for stage in ("representation", "probe"):
+        folder = replacement / mode / "seed0" / stage / "best"
+        (folder / "params.msgpack").write_bytes(f"new_{stage}".encode())
+        metadata = json.loads((folder / "metadata.json").read_text())
+        metadata["params_file_hash"] = sha256(folder / "params.msgpack")
+        metadata["parameter_hash"] = f"new_{stage}"
+        if stage == "probe":
+            metadata["provenance"]["representation_checkpoint_hash"] = "new_representation"
+        write_json(folder / "metadata.json", metadata)
+    followup_path = tmp_path / "followup_seal.json"
+    options = {"protocol_dir": directory, "base_selection_seal": path, "replace_models": [mode]}
+    followup = seal_selections(replacement, followup_path, **options)
+    base = json.loads(path.read_text())
+    assert followup["base_selection_seal_hash"] == base["hash"]
+    assert followup["replaced_models"] == [mode]
+    for other in set(MODELS) - {mode}:
+        assert followup["selections"][other] == base["selections"][other]
+    validate_selection_seal(followup_path, checkpoint=replacement / mode / "seed0/probe/best")
+    assert seal_selections(replacement, followup_path, **options)["hash"] == followup["hash"]
+    with pytest.raises(ValueError, match="supplied together"):
+        seal_selections(replacement, tmp_path / "bad.json", protocol_dir=directory, replace_models=[mode])
+    with pytest.raises(ValueError, match="nonempty"):
+        seal_selections(replacement, tmp_path / "bad.json", **{**options, "replace_models": []})
+    (replacement / mode / "seed0/probe/best/params.msgpack").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="changed"):
+        validate_selection_seal(followup_path)
     with pytest.raises(ValueError, match="requires"):
         validate_selection_seal(None)
     with pytest.raises(ValueError, match="not one"):

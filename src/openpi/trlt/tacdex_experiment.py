@@ -21,10 +21,30 @@ def sha256(path):
     return result.hexdigest()
 
 
-def seal_selections(checkpoint_root, output, *, protocol_dir=DEFAULT_PROTOCOL, seed=0):
+def seal_selections(
+    checkpoint_root, output, *, protocol_dir=DEFAULT_PROTOCOL, seed=0, base_selection_seal=None, replace_models=None
+):
+    """Seal all four selections, optionally replacing explicit models for a follow-up.
+
+    Unchanged models retain the exact validated records from the completed base
+    experiment. A follow-up still seals its new validation selections before test.
+    """
     protocol = read_manifest(root_path(protocol_dir) / "protocol.json")
     records = {}
-    for mode in MODELS:
+    modes = MODELS
+    lineage = {}
+    if (base_selection_seal is None) != (replace_models is None):
+        raise ValueError("base_selection_seal and replace_models must be supplied together")
+    if base_selection_seal is not None:
+        modes = tuple(replace_models)
+        if not modes or len(set(modes)) != len(modes) or not set(modes) <= set(MODELS):
+            raise ValueError("Replacement models must be nonempty, unique and supported")
+        base = validate_selection_seal(base_selection_seal, protocol_dir=protocol_dir)
+        if base["seed"] != seed:
+            raise ValueError("Base selection seed mismatch")
+        records = {mode: dict(stages) for mode, stages in base["selections"].items()}
+        lineage = {"base_selection_seal_hash": base["hash"], "replaced_models": list(modes)}
+    for mode in modes:
         records[mode] = {}
         for stage in ("representation", "probe"):
             directory = root_path(checkpoint_root) / mode / f"seed{seed}" / stage / "best"
@@ -60,12 +80,17 @@ def seal_selections(checkpoint_root, output, *, protocol_dir=DEFAULT_PROTOCOL, s
             "protocol_hash": protocol["hash"],
             "protocol_dir": str(root_path(protocol_dir)),
             "selections": records,
+            **lineage,
         }
     )
     destination = root_path(output)
     if destination.exists():
         previous = read_manifest(destination)
-        if previous["selections"] != records or previous["protocol_hash"] != protocol["hash"]:
+        if (
+            previous["selections"] != records
+            or previous["protocol_hash"] != protocol["hash"]
+            or any(previous.get(key) != value for key, value in lineage.items())
+        ):
             raise ValueError("Existing seal differs; never replace selections after test access")
         return previous
     write_json(destination, result)

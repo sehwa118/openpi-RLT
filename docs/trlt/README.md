@@ -604,3 +604,14 @@ record native dataset dimensions/ordering plus the representation config in both
 Stage A/B runs. Defaults for older configs remain disabled/N=1. See the
 [Assembly experiment plan](3dtacdex_experiments.md) for batch64/micro64 and bounded
 GPU/offline-SDK verification evidence; no full experiment was launched.
+
+
+3DTac-Dex Assembly의 별도 seed0 실험도 2026-11-18 16:11 UTC에 평가까지
+34단계 모두 완료했다. Original RLT / self / cross / alternating의 주 MSE는
+0.059761 / 0.092136 / 0.090131 / 0.085492이며, 이 설정에서는 RLT가 가장 낮다.
+[Assembly 설정·결과·해석 및 실행 근거](3dtacdex_experiments.md#완료된-assembly-실험-결과-2026-11-18)를 참조한다.
+
+
+Assembly self attention 2층 후속 실험도 2026-11-19 03:26 UTC에 평가까지 완료했다.
+주 MSE 0.081194로 self4 대비11.88% 감소했지만 RLT 대비35.86% 높다.
+[2층 후속 실험 결과와 한계](3dtacdex_experiments.md#self-attention-2층-후속-실험-완료-결과-2026-11-19)를 참조한다.

@@ -298,3 +298,183 @@ CPU11tests passed(선택 회귀7deselected). 증거:
 [실행 보고서](../../experiments/trlt/3dtacdex_assembly/feature_optimization_20261118/report.md).
 큐는 이 확인 시점에 stage 4/34 `rlt_original_gpu_preflight`로 진행했으며,
 본 학습 및 최종 평가는 후속 단계다. 현재 진행은 새 run의 실제 status/log를 확인한다.
+
+
+## 완료된 Assembly 실험 결과 (2026-11-18)
+
+실험 `assembly_8k_fullb64_batched_seed0_20261118`는 **2026-11-18 16:11:22 UTC**
+(한국시간 11월 19일 01:11)에 평가와 집계까지 **34/34 단계 모두 완료**했다.
+네 모델 모두 Stage A를 실제 **8,000 optimizer updates**까지 학습했다.
+설정은 batch 64 / microbatch 64 / accumulation 1, modality embedding 제거,
+seed0이다. Stage B는 representation을 고정한 action MLP이며 validation으로
+checkpoint를 선택했다. 원본 trajectory 기준 train/validation/test는 77/16/16이다.
+
+주 지표는 train 통계로 정규화한 action MSE를 각 **원본 test trajectory 안에서**
+평균한 뒤, **16개 trajectory를 동일 가중치로 평균**한 값이다. 낮을수록 좋다.
+LeRobot segment 18개를 독립 표본 18개로 세지 않는다.
+
+| 모델 | Test normalized trajectory-macro MSE ↓ | RLT 대비 오차 변화 | 선택된 Stage A step | 선택된 Stage B epoch |
+|---|---:|---:|---:|---:|
+| Original RLT | 0.059761 | 기준 | 8,000 | 17 |
+| TRLT self attention | 0.092136 | +54.17% | 7,888 | 13 |
+| TRLT cross attention | 0.090131 | +50.82% | 7,656 | 12 |
+| TRLT alternating | 0.085492 | +43.06% | 8,000 | 13 |
+
+**이번 조건에서는 Original RLT가 가장 낮은 오차를 보였고, TRLT 세 종류 중에서는
+alternating이 가장 좋았다.** 이 결과에서는 tactile fusion의 action 예측 성능
+이득이 관찰되지 않았다. 다만 구조, native tactile 인코딩, reconstruction 목적과
+가중치 등 여러 요인이 함께 다르므로 원인을 tactile 정보 자체로 특정할 수 없다.
+T-Rex의 다른 데이터/시간 계약/학습량 결과와 수치를 직접 합쳐 비교하지 않는다.
+
+RLT와의 차이(TRLT − RLT)를 원본 trajectory 단위로 paired bootstrap한
+95% 구간은 다음과 같다. 세 구간 모두 양수로, 이 seed와 test 표본에서 TRLT의
+오차가 더 높은 방향이다.
+
+| 모델 | MSE 차이 | Paired trajectory-bootstrap 95% 구간 |
+|---|---:|---:|
+| TRLT self attention | +0.032375 | [0.017205, 0.050393] |
+| TRLT cross attention | +0.030370 | [0.015052, 0.048020] |
+| TRLT alternating | +0.025730 | [0.012252, 0.041992] |
+
+이 구간은 **학습 seed 간 변동성을 포함하지 않는다**. seed0 한 번의 결과이며,
+실제 로봇 제어 성공률이나 다른 seed에서의 순위를 입증하지 않는다. 일반 집계기의
+`missing_expected_seeds: [1,2]` 표시는 요청된 seed0 실험이 미완료라는 뜻이 아니다.
+Stage A의 RLT visual-only total과 TRLT visual+tactile total은 목적 항이 달라
+총 reconstruction loss만으로 모델 간 우열을 비교하지 않는다.
+
+실행/평가 대조 결과: 네 모델의 원본 test trajectory ID와 각 trajectory의 valid
+요소 수가 같고, 모델당 총 **248,112개 valid action 요소**를 사용했다. 동일한
+split/normalization/query/feature cache 해시를 확인했고, 원본 trajectory별 MSE로
+주 지표를 다시 집계해 일치함을 확인했다. 모든 checkpoint 선택은 16:04:48 UTC에
+고정됐으며 test feature 추출은 그 뒤 16:04:50 UTC에 시작했다.
+
+근거: [최종 실행 보고서](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/final_report.md),
+[전체 지표와 paired bootstrap](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/summary.json),
+[비교 CSV](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/summary.csv),
+[평가 대상 일치 검사](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/comparison_validation.json),
+[이번 결과 대조 기록](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/results_review.json),
+[고정된 checkpoint 선택](../../experiments/trlt/3dtacdex_assembly/runs/assembly_8k_fullb64_batched_seed0_20261118/final_selections.json).
+각 모델의 `<model>/seed0/evaluation/metrics.json`과 `predictions.jsonl.gz`에
+세부 지표와 예측이 있다. 이 결과 정리에서는 학습·추출·평가를 재실행하지 않았다.
+
+
+## Self attention fusion 2층 후속 실험 (2026-11-19)
+
+사용자 요청으로 `trlt_self_only`를 fusion **2 layers**로 추가 실행한다.
+[2층 config](../../configs/trlt/3dtacdex_assembly/depth/trlt_self_only_2layer.json)는
+직전 실제 4층 실행 snapshot에서 `model.num_stages: 4 → 2`만 변경했다.
+Tactile history 3 frames, modality embedding 제거, seed0, Stage A 8000 updates,
+batch64/micro64/accumulation1, Stage B 기본값, W&B 10-step 기록을 유지한다.
+기존 split/정규화/7402-anchor visual cache를 재사용하며 feature 재추출은 없다.
+
+새 run: `assembly_self2_8k_fullb64_seed0_20261119T002037Z`.
+2026-11-19 00:22:58 UTC에 GPU0에서 독립 9단계 큐를 시작했다.
+1-update/full-validation GPU preflight → Stage A → train/validation latent export
+→ Stage B → checkpoint seal → test latent export → test 평가 → 비교 보고서 순서다.
+현재 완료 여부는 [실제 status](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/status.json)와
+[progress](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/progress.json)를 확인한다.
+체크포인트/latent/log는 새 run ID로 격리하고 기존 완료 결과는 보존한다.
+
+한 모델만 새로 학습하므로 `plan_tacdex_experiment.py seal`에
+`--base-selection-seal <기존 final_selections.json> --replace-models trlt_self_only`
+옵션을 추가했다. 기존 나머지 모델의 검증된 선택 기록을 그대로 보존하고 새 모델의
+Stage A/B best만 교체·검증해 별도 seal을 만든다. 기존 네 모델의 선택 확정 전 test를
+차단하는 기본 동작은 유지한다. CPU 회귀 2 tests와 7 CLI dry runs가 통과했고,
+기존 checkpoint 해시 및 격리된 과거 지표 replay로 보고서 생성도 검증했다.
+근거: `experiments/trlt/3dtacdex_assembly/depth_2layer_validation/` 및 새 run의
+`approved_plan.json`, `commands.json`, `launch_manifest.json`, `source_snapshot/`.
+
+최종 보고서는 기존 Original RLT, self-only 4층과 새 self-only 2층을 구분해
+비교하고 2층−4층 paired trajectory-bootstrap도 기록한다. 기존 test 결과를 본 뒤
+정한 후속 실험임을 명시하며, 이번 실행의 checkpoint 선택은 validation만 사용한다.
+단일 seed와 offline action prediction의 해석 한계도 유지한다.
+
+
+## Self attention 2층 후속 실험 완료 결과 (2026-11-19)
+
+추가 실험은 **2026-11-19 03:26:42 UTC / 12:26 KST**에 test 평가와 비교 보고서까지
+**9/9 단계 모두 완료**했다. 실제 Stage A는 8,000 optimizer updates이며, validation으로
+선택한 best는 **7,888 step**이다. Stage B best는 **epoch 12**, 마지막은 epoch 22
+(patience 10 종료)다. Seed0 / batch64 / micro64 / accumulation1 / tactile history3 /
+modality embedding 없음 등의 설정은 기존과 같다. 모델 설정에서 바뀐 값이
+`num_stages: 4 → 2` 하나뿐임을 실행 provenance로 대조했다.
+
+주 지표는 동일한 **원본 test trajectory 16개**의 normalized action MSE를 각
+trajectory 안에서 평균하고, trajectory 간 동일 가중치로 평균한 값이다. 낮을수록 좋다.
+
+| 모델 | Fusion layers | Test normalized trajectory-macro MSE ↓ | RLT 대비 오차 변화 |
+|---|---:|---:|---:|
+| Original RLT | — | 0.059761 | 기준 |
+| TRLT self attention | 2 | 0.081194 | +35.86% |
+| TRLT alternating | 4 | 0.085492 | +43.06% |
+| TRLT cross attention | 4 | 0.090131 | +50.82% |
+| TRLT self attention | 4 | 0.092136 | +54.17% |
+
+**Self attention의 fusion을 4층에서 2층으로 줄이면 이번 seed0의 test MSE가
+0.092136 → 0.081194로 11.88% 감소**했다. 실행된 TRLT 설정 중 가장 낮지만,
+Original RLT 0.059761보다는 여전히 35.86% 높다.
+
+2층−4층 MSE 차이는 **−0.010942**, paired original-trajectory bootstrap 95% 구간은
+**[−0.016479, −0.005356]**이다. 이 seed와 test 표본에서는 개선 방향이다.
+2층−RLT 차이의 95% 구간은 **[+0.009639, +0.034084]**로 RLT보다 높은 오차다.
+이 구간들은 training seed 간 변동성을 포함하지 않는다.
+
+Stage A best total reconstruction validation loss는 4층 1.496196 / 2층 1.497788로
+비슷한 반면, Stage B best validation MSE는 0.112642 → 0.090179로 낮아졌다.
+재구성 total loss 하나만으로 action probe의 성능 순위를 판단할 수 없음을 보여준다.
+단일 실험만으로 개선 원인을 과적합 완화 등으로 확정하지 않는다.
+
+검증: 기존 모델과 원본 test trajectory ID 및 trajectory별 valid 요소 수가 같고,
+모델당 총 248,112 valid action 요소를 사용했다. Split/query/normalization/feature
+cache provenance가 같고, trajectory별 MSE로 주 지표를 재집계해 일치함을 확인했다.
+새 Stage A/B 선택을 고정한 뒤 새 test latent export와 평가를 진행했다. 기존
+Original RLT / self4 / cross4 / alternating4 결과는 재학습·재평가하지 않고 재사용했다.
+
+이는 이전 test 결과를 본 뒤 정한 **후속 탐색 실험**이다. 동일 조건의 깊이 비교지만,
+여러 seed에서의 재현성이나 실제 로봇 제어 성공률을 입증하지 않는다.
+
+근거: [최종 보고서](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/final_report.md), [집계 JSON](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/summary.json),
+[비교 CSV](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/summary.csv), [실행 결과 대조](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/results_review.json),
+[원본 2층 test 지표](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/trlt_self_only/seed0/evaluation/metrics.json),
+[checkpoint 선택](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_8k_fullb64_seed0_20261119T002037Z/final_selections.json).
+학습 곡선: [Stage A W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/tjyjid6l),
+[Stage B W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/46v2tn4l).
+이 결과 정리에서는 학습·feature 추출·평가를 새로 실행하지 않았다.
+
+
+## Self attention 2층 + modality embedding 후속 실험 (2026-11-19)
+
+사용자 요청으로 직전 self-only2 설정에 **modality embedding을 다시 활성화**한다.
+새 [config](../../configs/trlt/3dtacdex_assembly/modality/trlt_self_only_2layer_modality.json)는
+직전 실제 2층 run의 config에서 `model.use_modality_embedding: false → true`만
+변경했다. Visual / tactile / state용 학습 embedding 3개, 각 512차원이다.
+Sensor ID, camera/patch, 상대 시간 embedding과 readout query는 기존대로 유지한다.
+
+유지 설정: fusion2, seed0, tactile3frames, Stage A8000updates,
+batch64/micro64/accumulation1, Stage B 기본값 및 validation checkpoint 선택,
+W&B online 10-step 기록. 기존 split/train-only 정규화/7402-anchor feature cache를
+재사용하고 backbone feature를 다시 추출하지 않는다. 기존 완료 실험도 보존한다.
+
+Run `assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z`가
+**2026-11-19T03:50:26.710345+00:00**에 GPU0 큐로 시작됐다.
+GPU 1-update/full-validation preflight → Stage A → train/validation latent export
+→ Stage B → 새 선택 seal → test latent export → 평가 → 비교 보고서의 9단계다.
+실제 현재 단계/완료는 [status](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/status.json),
+[progress](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/progress.json), stage logs 및 checkpoint에서 확인한다.
+Tmux socket `trlt-runs`, session `trlt-assembly-self2-modality-seed0`.
+
+CPU 검증: 활성화 시 기존 config 직렬화 호환성 회귀 1 test 통과(무관한 8개 제외),
+새 CLI 7개 dry-run 통과, 기존 checkpoint 해시 및 격리된 과거 지표 replay 통과.
+근거는 `experiments/trlt/3dtacdex_assembly/modality_2layer_validation/`의
+`pytest.xml`, `cpu_preflight.json`, `dry_run_*.json`, `report_replay.log`다.
+과거 지표 replay는 새 모델의 평가 결과가 아니다.
+
+기존 serializer는 기본값 true를 생략할 수 있으므로, 실행 config의 명시적 true와
+실제 checkpoint의 `encoder/modality_embed` **[3,512]** 존재·유한값도 확인한다.
+큐의 modality 검사는 이 기본값 생략 규칙을 반영한다. 원래 four-model seal
+계약은 유지하고 직전 2층 modality-off seal에서 self-only 선택만 새 best로 교체한다.
+
+최종 보고서는 Original RLT / self4 modality-off / self2 modality-off / 새 self2
+modality-on을 구분하고, **self2 on−off paired trajectory-bootstrap**도 기록한다.
+이전 test 결과를 확인한 뒤 요청한 후속 탐색 실험이라는 점을 명시한다. 새 실험의
+checkpoint 선택은 validation만 사용하며 test는 선택을 고정한 뒤 평가한다.

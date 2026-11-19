@@ -16,6 +16,8 @@ def main():
     seal.add_argument("--checkpoint-root", required=True)
     seal.add_argument("--output", required=True)
     seal.add_argument("--protocol-dir", default="datasets/3dtacdex_assembly/protocol")
+    seal.add_argument("--base-selection-seal", help="Completed four-model seal supplying unchanged model selections")
+    seal.add_argument("--replace-models", nargs="+", help="Explicit models to replace using --checkpoint-root")
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["JAX_PLATFORMS"] = "cpu"
@@ -25,7 +27,13 @@ def main():
     if args.command == "plan":
         result = write_plan(args.run_id, device=args.device)
     else:
-        result = seal_selections(args.checkpoint_root, args.output, protocol_dir=args.protocol_dir)
+        result = seal_selections(
+            args.checkpoint_root,
+            args.output,
+            protocol_dir=args.protocol_dir,
+            base_selection_seal=args.base_selection_seal,
+            replace_models=args.replace_models,
+        )
     print(json.dumps(result, indent=2))
 
 
