@@ -478,3 +478,49 @@ CPU 검증: 활성화 시 기존 config 직렬화 호환성 회귀 1 test 통과
 modality-on을 구분하고, **self2 on−off paired trajectory-bootstrap**도 기록한다.
 이전 test 결과를 확인한 뒤 요청한 후속 탐색 실험이라는 점을 명시한다. 새 실험의
 checkpoint 선택은 validation만 사용하며 test는 선택을 고정한 뒤 평가한다.
+
+
+## Self attention 2층 modality embedding ON/OFF 완료 결과 (2026-11-19)
+
+Modality-on 후속 실험은 **2026-11-19 07:06:42 UTC / 16:06 KST**에 최종 test
+평가와 집계까지 **9/9 단계 모두 완료**했다. Stage A는 실제 **8,000 optimizer
+updates**를 완료했고 validation best는 **7,192 step**, Stage B best는
+**epoch 13**이다(마지막 epoch 23, patience 10). 직전 modality-off2와 비교해
+model 설정은 `use_modality_embedding:false→true`만 바뀌었다. Fusion2, seed0,
+tactile3frames, batch64/micro64/accumulation1 및 나머지 설정은 동일하다.
+
+동일한 원본 test trajectory 16개에서 normalized action MSE를 trajectory별로
+평균한 뒤 동일 가중치로 집계한 주 지표다. 낮을수록 좋다.
+
+| 모델 | Test normalized trajectory-macro MSE ↓ | RLT 대비 오차 변화 |
+|---|---:|---:|
+| Original RLT | 0.059761 | 기준 |
+| TRLT self2 / modality OFF | 0.081194 | +35.86% |
+| TRLT self2 / modality ON | 0.080930 | +35.42% |
+
+**Modality ON의 오차는 OFF보다 0.33% 낮았지만, 이번 결과로 명확한 개선 효과를
+확인하기 어렵다.** ON−OFF MSE 차이는 **−0.000264**이고, 원본 trajectory 단위
+paired bootstrap 95% 구간은 **[−0.005464, +0.005207]**로 0을 포함한다.
+이 구간은 두 설정의 동등성을 입증하는 검정이 아니며, 단일 seed 결과에서 계산했다.
+Original RLT보다 ON의 오차가 여전히 35.42% 높다. ON−RLT 차이의 95% 구간은
+[+0.011010, +0.032884]로 이 seed/test 표본에서 RLT가 낮은 오차를 보인다.
+
+검증: 선택된 best checkpoint에 `encoder/modality_embed` [3,512] 파라미터가
+실제로 존재하고 유한함을 CPU에서 확인했다. 켜짐은 기존 직렬화의 기본값이므로
+model-config dict에 true 항목이 생략될 수 있다. ModelConfig로 복원한 on/off 설정을
+대조해 해당 flag 외의 값이 같음을 확인했다. 각 모델의 원본 test trajectory ID,
+trajectory별 valid 요소 수 및 총 248,112 valid action 요소가 동일하고, split/query/
+normalization/feature cache provenance도 같다. 원본 trajectory별 지표로 주 MSE를
+재집계해 일치함을 확인했다. 새 checkpoint 선택을 고정한 뒤 새 test export/평가를
+진행했으며, 기존 RLT/self4/self2-off 결과는 재학습·재평가하지 않고 재사용했다.
+
+단일 seed이며 이전 test 결과를 본 뒤 정한 후속 탐색 실험이다. Trajectory
+bootstrap은 학습 seed 간 변동성을 포함하지 않으며 실제 제어 성공률을 뜻하지 않는다.
+
+근거: [최종 보고서](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/final_report.md), [집계/신뢰구간](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/summary.json),
+[CSV](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/summary.csv), [결과 대조](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/results_review.json),
+[원본 test 지표](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/trlt_self_only/seed0/evaluation/metrics.json),
+[고정된 checkpoint 선택](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/final_selections.json).
+[Stage A W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/1qqlmlzz),
+[Stage B W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/fn1lncp3).
+이 결과 정리에서는 학습·추출·평가를 새로 실행하지 않았다.

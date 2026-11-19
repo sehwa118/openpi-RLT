@@ -615,3 +615,8 @@ GPU/offline-SDK verification evidence; no full experiment was launched.
 Assembly self attention 2층 후속 실험도 2026-11-19 03:26 UTC에 평가까지 완료했다.
 주 MSE 0.081194로 self4 대비11.88% 감소했지만 RLT 대비35.86% 높다.
 [2층 후속 실험 결과와 한계](3dtacdex_experiments.md#self-attention-2층-후속-실험-완료-결과-2026-11-19)를 참조한다.
+
+
+Assembly self2 modality-on 후속 실험은 2026-11-19 07:06 UTC에 최종 평가까지
+완료했다. 주 MSE 0.080930으로 off의0.081194보다0.33% 낮지만, paired trajectory
+95% 차이 구간이0을 포함한다. [Modality ON/OFF 완료 결과](3dtacdex_experiments.md#self-attention-2층-modality-embedding-onoff-완료-결과-2026-11-19)를 참조한다.

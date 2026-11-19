@@ -647,3 +647,24 @@ This is a historical handoff, not a live process-status report. Verify later art
   `gpu_preflight_observation.json` and `modality_2layer_validation/summary.json`.
   These are preflight/startup observations; inspect live state for later updates
   or completion, not this record.
+
+
+### Completed Assembly self2 modality-on experiment: verified 2026-11-19
+
+- Run `assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z` completed all9stages
+  at2026-11-19T07:06:42Z, including final evaluation. Stage A actually8000updates;
+  selected A7192/B epoch13 (last B23). Primary test MSE0.080929551 vs same2layer
+  modality-off0.081193840: -0.33% error. Paired on−off trajectory-bootstrap95%
+  CI[-0.005464,+0.005207] includes zero; improvement remains unestablished.
+  On remains35.42% above RLT0.059761459. Only seed0; no seed variability measured.
+- Actual selected best has finite `encoder/modality_embed` [3,512]. Only model
+  setting change is false→true; restore ModelConfig defaults when comparing
+  serialization (enabled true can be omitted). Same16original test trajectory
+  IDs/counts and248112valid elements/model, common normalization/features;
+  primary means and selection-before-test timing verified. Evidence in run:
+  `final_report.md`, `summary.json`, `results_review.json`, raw evaluation and
+  `final_selections.json`. Korean summary: `docs/trlt/3dtacdex_experiments.md`.
+- Supersedes startup/preflight-only observations. No retraining/extraction/
+  evaluation was performed to review results. Preserve exploratory designation
+  (follow-up after previous test review); never restart/duplicate the completed
+  queue or rebuild the feature cache automatically.

@@ -255,3 +255,14 @@ validation queries on GPU0 at64/64/1; saved checkpoint modality embedding is
 finite with shape[3,512]. Main Stage A started fresh at2026-11-19T03:52:34.818280+00:00.
 See run `gpu_preflight_observation.json`; no full8k/final-evaluation completion
 is implied by this bounded check.
+
+
+Modality-on self2 final completion, verified2026-11-19: run `assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z`
+finished9/9stages at2026-11-19T07:06:42Z. Actual Stage A8000updates; selected A7192
+and B epoch13. Primary0.080929551, vs off0.081193840 (-0.33%); paired trajectory
+95% delta CI[-0.005464,+0.005207] includes zero. Best checkpoint modality embedding
+[3,512] is finite/present; canonical ModelConfig comparison differs only in the
+modality flag. Same16source trajectories,248112valid elements and protocol/cache
+provenance; raw means, checkpoint lineage and test-after-seal timing passed.
+See [results review](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/results_review.json) and the completed Korean summary
+in `3dtacdex_experiments.md`. No new GPU work/evaluation was run during review.
