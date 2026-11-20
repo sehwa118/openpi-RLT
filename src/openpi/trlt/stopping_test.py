@@ -1,6 +1,5 @@
 """CPU-compatible checks for step budgets and optional early stopping."""
 
-from dataclasses import asdict
 import json
 
 import numpy as np
@@ -9,6 +8,7 @@ import pytest
 from openpi.trlt.config import MODELS
 from openpi.trlt.config import ProbeConfig
 from openpi.trlt.config import TrainConfig
+from openpi.trlt.config import probe_config_dict
 from openpi.trlt.config import root_path
 from openpi.trlt.runner import SyntheticDataset
 from openpi.trlt.runner import load_checkpoint
@@ -82,7 +82,8 @@ def test_experiment_configs_keep_probe_defaults(mode):
     raw = json.loads(root_path(f"configs/trlt/{mode}.json").read_text())
     config = TrainConfig(**raw["representation"])
     assert (config.max_steps, config.max_epochs, config.patience) == (15_000, None, None)
-    assert raw["probe"] == asdict(ProbeConfig())
+    assert raw["probe"] == probe_config_dict(ProbeConfig())
+    assert ProbeConfig(**raw["probe"]) == ProbeConfig()
 
 
 def test_probe_keeps_epoch_budget_and_early_stopping(tmp_path):

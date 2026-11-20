@@ -199,7 +199,7 @@ def _aggregate_metrics(metrics):
     return result
 
 
-def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=42):
+def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=42, baseline_model="rlt_original"):
     """Summarize all seeds without selecting a favorable test seed/checkpoint."""
     records = [json.loads(Path(path).read_text()) for path in paths]
     by_model = defaultdict(dict)
@@ -208,7 +208,18 @@ def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=4
         if training_seed in by_model[model]:
             raise ValueError(f"Duplicate result {model}/{training_seed}")
         by_model[model][training_seed] = row
-    summary = {"models": {}, "paired_vs_rlt": {}, "std_ddof": 1, "bootstrap_unit": "episode"}
+    if baseline_model == "rlt_original":
+        paired_key = "paired_vs_rlt"
+        summary = {"models": {}, paired_key: {}, "std_ddof": 1, "bootstrap_unit": "episode"}
+    else:
+        paired_key = "paired_vs_baseline"
+        summary = {
+            "models": {},
+            "baseline_model": baseline_model,
+            paired_key: {},
+            "std_ddof": 1,
+            "bootstrap_unit": "episode",
+        }
     for model, rows in sorted(by_model.items()):
         values = {
             seed: row.get("metrics", {}).get("primary_normalized_episode_macro_mse") for seed, row in rows.items()
@@ -223,10 +234,10 @@ def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=4
                 {seed: _aggregate_metrics(row.get("metrics", {})) for seed, row in rows.items()}
             ),
         }
-    baseline = by_model.get("rlt_original", {})
+    baseline = by_model.get(baseline_model, {})
     rng = np.random.default_rng(seed)
     for model, rows in sorted(by_model.items()):
-        if model == "rlt_original":
+        if model == baseline_model:
             continue
         pairs = {}
         for training_seed in sorted(set(rows) & set(baseline)):
@@ -274,7 +285,7 @@ def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=4
                 "paired_episode_bootstrap_95_ci": ci,
                 "episode_count": len(differences),
             }
-        summary["paired_vs_rlt"][model] = pairs
+        summary[paired_key][model] = pairs
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(json.dumps(summary, indent=2, allow_nan=False))

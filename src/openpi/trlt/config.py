@@ -17,6 +17,9 @@ SENSORS = tuple(
     for finger in ("thumb", "index", "middle", "ring", "pinky")
 )
 MODELS = ("rlt_original", "trlt_self_only", "trlt_cross_only", "trlt_alternating")
+PROBE_ARCHITECTURES = ("mlp", "resmlp", "part_attention")
+PROBE_ATTENTION_MASK_MODES = ("full", "kinematic", "hierarchical")
+PROBE_LR_SCHEDULES = ("constant", "cosine")
 SCHEMA_VERSION = 1
 
 
@@ -156,6 +159,43 @@ class ProbeConfig:
     batch_size: int = 256
     max_epochs: int = 100
     patience: int = 10
+    architecture: Literal["mlp", "resmlp", "part_attention"] = "mlp"
+    num_heads: int = 4
+    mlp_ratio: float = 4.0
+    attention_mask_mode: Literal["full", "kinematic", "hierarchical"] = "full"
+    lr_schedule: Literal["constant", "cosine"] = "constant"
+    warmup_steps: int = 0
+    min_lr_ratio: float = 0.1
+    gradient_clip: float = 1.0
+
+    def __post_init__(self):
+        if min(self.hidden_dim, self.depth, self.action_dim, self.horizon, self.batch_size) <= 0:
+            raise ValueError("Probe dimensions, horizon and batch size must be positive")
+        if self.architecture not in PROBE_ARCHITECTURES:
+            raise ValueError(f"Unknown probe architecture: {self.architecture}")
+        if self.attention_mask_mode not in PROBE_ATTENTION_MASK_MODES:
+            raise ValueError(f"Unknown attention mask mode: {self.attention_mask_mode}")
+        if self.lr_schedule not in PROBE_LR_SCHEDULES:
+            raise ValueError(f"Unknown lr_schedule: {self.lr_schedule}")
+        if not math.isfinite(self.dropout_rate) or not (0.0 <= self.dropout_rate < 1.0):
+            raise ValueError("dropout_rate must be finite and in [0, 1)")
+        if not math.isfinite(self.learning_rate) or self.learning_rate < 0:
+            raise ValueError("learning_rate must be finite and nonnegative")
+        if not math.isfinite(self.weight_decay) or self.weight_decay < 0:
+            raise ValueError("weight_decay must be finite and nonnegative")
+        if self.warmup_steps < 0:
+            raise ValueError("warmup_steps must be nonnegative")
+        if not math.isfinite(self.min_lr_ratio) or not (0.0 <= self.min_lr_ratio <= 1.0):
+            raise ValueError("min_lr_ratio must be finite and in [0, 1]")
+        if not math.isfinite(self.gradient_clip) or self.gradient_clip <= 0:
+            raise ValueError("gradient_clip must be finite and positive")
+        if self.architecture == "part_attention":
+            if self.num_heads <= 0 or self.hidden_dim % self.num_heads != 0:
+                raise ValueError("part_attention requires positive num_heads dividing hidden_dim")
+            if not math.isfinite(self.mlp_ratio) or self.mlp_ratio <= 0:
+                raise ValueError("part_attention requires positive finite mlp_ratio")
+            if self.action_dim not in (58, 22):
+                raise ValueError("part_attention supports 58D T-Rex and 22D OMY+LEAP action dimensions")
 
 
 # Tensor batch contract consumed by model and runner:
@@ -191,3 +231,29 @@ def model_config_dict(config):
         ):
             value.pop(key)
     return value
+
+
+def probe_config_dict(config: ProbeConfig) -> dict:
+    """Keep default MLP probe checkpoint identity and configs compatible with legacy runs."""
+    value = asdict(config)
+    if config.architecture == "mlp":
+        for key in ("architecture", "num_heads", "mlp_ratio", "attention_mask_mode"):
+            value.pop(key)
+    elif config.architecture == "resmlp":
+        for key in ("num_heads", "mlp_ratio", "attention_mask_mode"):
+            value.pop(key)
+    if config.lr_schedule == "constant":
+        value.pop("lr_schedule")
+        value.pop("min_lr_ratio")
+        if config.warmup_steps == 0:
+            value.pop("warmup_steps")
+    if config.gradient_clip == 1.0:
+        value.pop("gradient_clip")
+    return value
+
+
+def probe_variant_name(config: ProbeConfig) -> str:
+    """Return canonical directory/model suffix identifying the Stage B probe variant."""
+    if config.architecture == "part_attention":
+        return f"part_attention_{config.attention_mask_mode}"
+    return config.architecture

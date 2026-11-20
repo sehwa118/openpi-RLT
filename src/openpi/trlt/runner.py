@@ -18,7 +18,6 @@ import subprocess
 import sys
 import time
 
-from flax import linen as nn
 from flax import serialization
 from flax.training import train_state
 import jax
@@ -27,12 +26,16 @@ import numpy as np
 import optax
 from tqdm.auto import tqdm
 
+from openpi.models.trlt_actor import ActionProbe  # noqa: F401
+from openpi.models.trlt_actor import build_action_probe
 from openpi.trlt.config import ModelConfig
 from openpi.trlt.config import ProbeConfig
 from openpi.trlt.config import TemporalConfig
 from openpi.trlt.config import TrainConfig
 from openpi.trlt.config import digest
 from openpi.trlt.config import model_config_dict
+from openpi.trlt.config import probe_config_dict
+from openpi.trlt.config import probe_variant_name
 from openpi.trlt.config import root_path
 from openpi.trlt.loading import OrderedBatchSampler
 from openpi.trlt.loading import TrainingCollator
@@ -265,10 +268,32 @@ def _tree_all_finite(tree):
     return jnp.all(jnp.stack([jnp.all(jnp.isfinite(value)) for value in jax.tree_util.tree_leaves(tree)]))
 
 
-def _optimizer(config, clip=1.0):
-    return optax.chain(
-        optax.clip_by_global_norm(clip), optax.adamw(config.learning_rate, weight_decay=config.weight_decay)
-    )
+def _optimizer(config, clip=1.0, *, total_steps=None):
+    schedule = getattr(config, "lr_schedule", "constant")
+    warmup_steps = int(getattr(config, "warmup_steps", 0))
+    min_lr_ratio = float(getattr(config, "min_lr_ratio", 0.1))
+    peak_lr = float(config.learning_rate)
+    if (schedule == "constant" and warmup_steps == 0) or peak_lr == 0.0:
+        lr = config.learning_rate
+    elif schedule == "cosine":
+        effective_total = max(int(total_steps or 1), 1)
+        warmup = min(warmup_steps, max(effective_total - 1, 0))
+        if effective_total <= 1:
+            lr = optax.constant_schedule(peak_lr)
+        else:
+            lr = optax.warmup_cosine_decay_schedule(
+                init_value=0.0 if warmup > 0 else peak_lr,
+                peak_value=peak_lr,
+                warmup_steps=warmup,
+                decay_steps=max(effective_total, warmup + 1),
+                end_value=peak_lr * min_lr_ratio,
+            )
+    else:
+        lr = optax.join_schedules(
+            [optax.linear_schedule(0.0, peak_lr, warmup_steps), optax.constant_schedule(peak_lr)],
+            boundaries=[warmup_steps],
+        )
+    return optax.chain(optax.clip_by_global_norm(clip), optax.adamw(lr, weight_decay=config.weight_decay))
 
 
 def _mean_metrics(rows, counts):
@@ -308,22 +333,6 @@ def _mean_metrics(rows, counts):
             else output["visual_loss"]
         )
     return output
-
-
-class ActionProbe(nn.Module):
-    config: ProbeConfig
-
-    @nn.compact
-    def __call__(self, z, proprioception, visual_age_seconds, *, train=False):
-        z = jax.lax.stop_gradient(z)
-        age = visual_age_seconds.reshape((z.shape[0], 1))
-        x = jnp.concatenate((z.reshape((z.shape[0], -1)), proprioception, age), axis=-1)
-        for index in range(self.config.depth):
-            x = nn.Dense(self.config.hidden_dim, name=f"hidden_{index}")(x)
-            x = nn.gelu(x)
-            x = nn.Dropout(self.config.dropout_rate)(x, deterministic=not train)
-        x = nn.Dense(self.config.horizon * self.config.action_dim, name="output")(x)
-        return x.reshape((x.shape[0], self.config.horizon, self.config.action_dim))
 
 
 def probe_loss(prediction, target, valid_mask):
@@ -398,7 +407,7 @@ def _train(
     first = collate([train_dataset[0]], fields)
     _progress("Initializing model and optimizer on the selected device.")
     if probe:
-        model = ActionProbe(config)
+        model = build_action_probe(config)
         variables = model.init(
             jax.random.PRNGKey(seed), first["z"], first["proprioception"], first["visual_age_seconds"], train=False
         )
@@ -409,8 +418,13 @@ def _train(
         variables = model.init(jax.random.PRNGKey(seed), first, train=False)
     if set(variables) != {"params"}:
         raise ValueError("Unexpected mutable model state; frozen/export contract requires explicit handling")
+    steps_per_epoch = (len(train_dataset) + config.batch_size - 1) // config.batch_size
+    schedule_steps = steps_per_epoch * config.max_epochs if config.max_epochs is not None else max_steps
+    total_steps = min(schedule_steps, max_steps) if max_steps is not None else schedule_steps
     state = train_state.TrainState.create(
-        apply_fn=model.apply, params=variables["params"], tx=_optimizer(config, getattr(config, "gradient_clip", 1.0))
+        apply_fn=model.apply,
+        params=variables["params"],
+        tx=_optimizer(config, getattr(config, "gradient_clip", 1.0), total_steps=schedule_steps),
     )
     resolved_provenance = dict(getattr(train_dataset, "provenance", {}), **(provenance or {}))
     resolved_provenance.pop("split", None)
@@ -425,9 +439,9 @@ def _train(
         "seed": seed,
         "model_config": model_config_dict(model_config) if model_config else None,
         # Preserve legacy checkpoint identity when no configured step limit exists.
-        "train_config": {
-            key: value for key, value in asdict(config).items() if key != "max_steps" or value is not None
-        },
+        "train_config": probe_config_dict(config)
+        if probe
+        else {key: value for key, value in asdict(config).items() if key != "max_steps" or value is not None},
         "provenance": resolved_provenance,
     }
     identity_hash = digest(identity)
@@ -574,10 +588,6 @@ def _train(
     start_time = time.perf_counter()
     log_dir.mkdir(parents=True, exist_ok=True)
     first_update = True
-    steps_per_epoch = (len(train_dataset) + config.batch_size - 1) // config.batch_size
-    total_steps = steps_per_epoch * config.max_epochs if config.max_epochs is not None else max_steps
-    if max_steps is not None:
-        total_steps = min(total_steps, max_steps)
     train_sampler = OrderedBatchSampler(config.batch_size)
     validation_sampler = OrderedBatchSampler(micro_size)
     with ExitStack() as stack:
@@ -942,7 +952,12 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
     _check_provenance(metadata["provenance"], provenance, "Evaluation cache/checkpoint")
     normalization = _validated_normalization(normalization, provenance.get("normalization_hash"))
     config = ProbeConfig(**metadata["train_config"])
-    model = ActionProbe(config)
+    model = build_action_probe(config)
+    rep_model = provenance.get("model")
+    probe_name = probe_variant_name(config)
+    eval_model = (
+        rep_model if config.architecture == "mlp" else (f"{rep_model}__{probe_name}" if rep_model else probe_name)
+    )
     predict = jax.jit(
         lambda batch: model.apply(
             {"params": params}, batch["z"], batch["proprioception"], batch["visual_age_seconds"], train=False
@@ -969,7 +984,7 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
             for i, sample in enumerate(samples):
                 for offset in range(config.horizon):
                     row = {
-                        "model": provenance.get("model"),
+                        "model": eval_model,
                         "seed": metadata["seed"],
                         "episode_id": int(sample["episode_id"]),
                         "object": str(sample["object"]),
@@ -986,7 +1001,9 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
     if parameter_hash(params) != original_hash:
         raise AssertionError("Probe mutated during evaluation")
     report = {
-        "model": provenance.get("model"),
+        "model": eval_model,
+        "probe_architecture": config.architecture,
+        "probe_variant": probe_name,
         "seed": metadata["seed"],
         "metrics": metrics.result(),
         "provenance": provenance,

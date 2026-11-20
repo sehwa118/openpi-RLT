@@ -66,6 +66,7 @@ def parser():
     summary.add_argument("metrics", nargs="+", type=Path)
     summary.add_argument("--output", default="experiments/trlt/summary.json")
     summary.add_argument("--bootstrap-samples", type=int, default=2000)
+    summary.add_argument("--baseline", default="rlt_original")
     return root
 
 
@@ -75,13 +76,17 @@ def main(argv=None):
     from openpi.trlt.config import ProbeConfig
     from openpi.trlt.config import TemporalConfig
     from openpi.trlt.config import TrainConfig
+    from openpi.trlt.config import probe_variant_name
     from openpi.trlt.config import root_path
 
     if args.command == "summarize":
         from openpi.trlt.metrics import summarize_results
 
         result = summarize_results(
-            [root_path(path) for path in args.metrics], root_path(args.output), bootstrap_samples=args.bootstrap_samples
+            [root_path(path) for path in args.metrics],
+            root_path(args.output),
+            bootstrap_samples=args.bootstrap_samples,
+            baseline_model=args.baseline,
         )
         print(json.dumps(result, indent=2))
         return
@@ -197,11 +202,12 @@ def main(argv=None):
                 force_cache_rebuild=args.force_cache_rebuild,
             ).manifest
     elif args.command == "train-probe":
+        probe_suffix = "probe" if probe.architecture == "mlp" else f"probe_{probe_variant_name(probe)}"
         result = train_action_probe(
             LatentDataset(args.train_latents),
             LatentDataset(args.validation_latents),
             probe,
-            args.output_dir or base + "/probe",
+            args.output_dir or f"{base}/{probe_suffix}",
             seed=args.seed,
             max_steps=args.max_steps,
             resume=args.resume,
@@ -209,14 +215,15 @@ def main(argv=None):
             progress=not args.no_progress,
             num_workers=args.num_workers,
             prefetch_factor=args.prefetch_factor,
-            log_dir=args.log_dir or logs + "/probe",
+            log_dir=args.log_dir or f"{logs}/{probe_suffix}",
         )
     else:
+        eval_suffix = "evaluation" if probe.architecture == "mlp" else f"evaluation_{probe_variant_name(probe)}"
         result = evaluate_action_probe(
             LatentDataset(args.latents),
             args.probe_checkpoint,
             args.normalization,
-            args.output_dir or logs + "/evaluation",
+            args.output_dir or f"{logs}/{eval_suffix}",
             batch_size=args.batch_size,
         )
     print(json.dumps(result, indent=2, default=str))
