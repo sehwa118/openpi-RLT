@@ -78,5 +78,9 @@
   "training_seeds": [
     0
   ],
-  "visual_cache": "datasets/3dtacdex_assembly/visual_cache"
+  "visual_cache": "datasets/3dtacdex_assembly/visual_cache",
+  "tactile_preprocessing": {
+    "mode": "raw_clip",
+    "scale": 30.0
+  }
 }

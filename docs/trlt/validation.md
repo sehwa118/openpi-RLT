@@ -266,3 +266,31 @@ modality flag. Same16source trajectories,248112valid elements and protocol/cache
 provenance; raw means, checkpoint lineage and test-after-seal timing passed.
 See [results review](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_modality_8k_fullb64_seed0_20261119T034907Z/results_review.json) and the completed Korean summary
 in `3dtacdex_experiments.md`. No new GPU work/evaluation was run during review.
+
+Assembly self2 rawclip30 follow-up (2026-11-19): CPU regression20cases, Ruff,
+10actual train/validation query transformations,8synchronous/spawned-worker
+query equivalence checks and7CLI dry runs passed. Default normalization identity,
+clipping/sign/bounds, invalid-pad masks, unchanged action labels, reconstruction
+target and bidirectional preprocessing-provenance rejection are covered.
+Evidence: `experiments/trlt/3dtacdex_assembly/rawclip30_validation/`.
+Historical report replay is not a new benchmark result. For authorized GPU
+preflight/training/evaluation status, inspect the rawclip30 run's actual events
+and checkpoints linked from `3dtacdex_experiments.md`.
+
+Rawclip30 full-shape GPU preflight subsequently passed1optimizer update and all
+3472validation queries at64/64/1 onGPU0. Saved provenance confirms raw_clip30.
+Main Stage A started fresh at2026-11-19T10:53:36Z; bounded validation evidence is
+`gpu_preflight_observation.json` in that run. Full benchmark/final evaluation
+completion remains to be verified from actual later artifacts.
+
+Assembly clipping-only default (2026-11-20): removed tactile mean/std input and
+statistics-generation paths; default and all7Assembly configs use raw_clip30.
+State/action statistics and historical artifacts remain intact. Twenty-one CPU
+regressions passed, including protocol preparation without tactile statistics,
+raw clipping/masks, legacy-mode rejection and bidirectional provenance checks.
+Actual default-vs-raw30 real train/validation query checks, spawned-worker
+identity, seven CLI dry runs and compatibility with the completed rawclip30
+checkpoint are recorded under
+`experiments/trlt/3dtacdex_assembly/clipping_default_validation/`.
+No new GPU work/training/evaluation was run. Completed benchmark result review:
+`experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/results_review.json`.

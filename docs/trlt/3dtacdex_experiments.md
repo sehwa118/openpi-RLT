@@ -26,7 +26,8 @@ RLT는 기존 visual encoder/decoder를 그대로 사용한다. TRLT는 공유 p
 더하고 현재 22D state와 visual age를 U에 넣는다. **2026-11-18 변경으로 visual/tactile/state
 modality embedding은 모두 제거한다** (`use_modality_embedding=false`). camera/patch/sensor ID/시간
 embedding과 decoder query는 유지한다. original RLT에는 본래 이 modality embedding이 없다.
-기존 tactile decoder가 각 history/pad slot의 45개 표준화 taxel 값을 재구성한다.
+현재 tactile decoder는 각 history/pad slot의 45개 `clip(raw/30,-1,1)` 값을 재구성한다.
+아래 과거 mean/std 실험 결과는 실행 당시 config snapshot을 기준으로 해석한다.
 visual decoder는 기존 구조를 공유한다. 양쪽 loss 가중치는 1이다.
 Stage A에서 action label은 입력/재구성 대상이 아니다.
 
@@ -49,9 +50,13 @@ RLT와 TRLT는 입력 정보/학습 목적도 다르므로 RLT 대비 차이를 
 | validation | 16 | 17 | 3,472 |
 | test | 16 | 18 | 3,778 |
 
-state22, action22, tactile8×15×3 각각의 mean/std는 **train 프레임만** 사용한다.
-action은 element mask, tactile은 pad mask와 finite 여부를 반영한다. 0 접촉은 유효하다.
-std floor는 1e-6이며 count/floored mask도 저장한다. 누락 hand command 10프레임은
+현재 state22와 action22의 mean/std만 **train 프레임으로** 계산한다.
+Tactile8×15×3의 유일한 전처리는 `clip(raw/30,-1,1)`이며, encoder 입력과
+reconstruction target에 동일하게 적용한다. 기준값30은 train raw 절댓값 분위수를
+검토해 정한 고정값이다(99.9%:26, 99.95%:32). 각 split/batch/query에서
+분위수를 다시 계산하지 않으며, 성분별 평균 제거·std 나눗셈은 하지 않는다.
+Action은 element mask, tactile은 pad mask와 finite 여부를 반영한다. 0 접촉은 유효하다.
+State/action std floor는1e-6이며 count/floored mask도 저장한다. 누락 hand command 10프레임은
 원본 데이터에 남고 해당 16개 차원만 action loss/정규화/지표에서 제외한다.
 LeRobot의 전체 데이터 통계와 기본 `train: 0:N` 표기는 실험 통계/split으로 쓰지 않는다.
 
@@ -524,3 +529,107 @@ bootstrap은 학습 seed 간 변동성을 포함하지 않으며 실제 제어 �
 [Stage A W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/1qqlmlzz),
 [Stage B W&B](https://wandb.ai/rnsrns118-seoul-national-university/trlt/runs/fn1lncp3).
 이 결과 정리에서는 학습·추출·평가를 새로 실행하지 않았다.
+
+## Self-only 2-layer raw clipping follow-up (2026-11-19)
+
+User selected `clip(raw / 30, -1, 1)` for both Assembly tactile encoder input
+and reconstruction target, with `lambda_tactile=1`. Config:
+`configs/trlt/3dtacdex_assembly/normalization/trlt_self_only_2layer_rawclip30.json`.
+Relative to the executed modality-off self2 experiment, this changes only tactile
+preprocessing. Seed0, two fusion layers, tactile history3, Stage A8000updates,
+batch64/micro64, Stage B defaults and online W&B10 remain unchanged. No episode
+or taxel is removed. State/action train statistics, fixed splits and the completed
+visual cache are reused; tactile no longer uses the saved coordinate mean/std.
+
+At launch, optional top-level `tactile_preprocessing={"mode":"raw_clip","scale":30.0}`
+was introduced beside the then-existing standardization default. The 2026-11-20
+policy below supersedes that default: raw clipping is now the only supported path.
+It is recorded separately in dataset, checkpoint and latent provenance. Mixing
+legacy/raw-clip representations, caches or different scales is rejected both ways. Invalid raw pads remain masked even if clipping could
+turn infinity into a finite bound. Decoder target is the transformed batch tactile.
+A bound on targets does not constrain the linear decoder's predictions to [-1,1].
+
+This normalization also changes reconstruction-loss scale; keeping lambda1 does
+not preserve the old visual/tactile balance. Compare downstream action metrics,
+and do not interpret a smaller total reconstruction loss as improvement. This is
+an exploratory follow-up after prior test inspection, with one seed only.
+
+CPU evidence: `experiments/trlt/3dtacdex_assembly/rawclip30_validation/`.
+Twenty regression cases and Ruff passed;10real train/validation queries match
+raw/30 exactly,8queries match synchronous/spawned-worker loading exactly, and
+seven CLI dry runs passed. Historical report replay is explicitly diagnostic,
+not a new experiment result.
+
+Prepared nine-stage queue:
+`experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/`.
+Stages: one-update GPU preflight with validation; fresh Stage A; train/validation
+latent export; Stage B; seal new validation selections using the completed base
+seal; test export/evaluation; comparison against historical RLT and standardized
+self2. Consult actual status/events/checkpoints before stating current progress.
+No cache re-extraction, automatic retry/resume, extra seed or baseline retraining.
+
+The rawclip30 queue actually launched at2026-11-19T10:51:10Z (19:51KST),
+GPU0, tmux socket `trlt-runs`, session `trlt-assembly-self2-rawclip30-seed0`.
+Active index: `experiments/trlt/3dtacdex_assembly/rawclip_active_run.json`
+(also Assembly/global active indices). First preflight model initialization
+was observed; later optimizer/preflight/benchmark completion must be read from
+actual logs and checkpoints rather than inferred from this launch record.
+
+
+## Rawclip30 완료 결과 및 tactile 전처리 기본 정책 (2026-11-20 확인)
+
+실험 `assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z`는
+**2026-11-19 23:02:41 KST (14:02:41 UTC)**에 평가·보고까지 **9/9단계 완료**했다.
+실제 Stage A는8000updates까지 학습했고 best도8000이다. Stage B는 epoch35까지
+진행한 뒤 patience10으로 종료했고 epoch25 checkpoint가 선택됐다. 설정은
+modality-off self-only2layers,seed0,batch64/micro64/accumulation1,lambda_tactile1이며,
+같은 self2 mean/std 실행 대비 변경한 실험 설정은 tactile 입력·재구성 target 전처리뿐이다.
+Visual cache와 split, state/action 통계는 동일하게 유지했다. 기존 결과는 재학습하지 않았다.
+
+아래는 지금까지 완료한 Assembly 설정의 통합표다. 새 기본 config 파일은 clipping으로
+변경됐으므로, 과거 결과 재현에는 해당 run의 실제 config/source snapshot을 사용한다.
+주 지표는 동일한16원본 test trajectory별 normalized action MSE를 동일 가중치로 평균한다.
+
+| 설정 | Tactile 전처리 | Fusion layers | Test 주 MSE ↓ | RLT 대비 오차 변화 |
+|---|---|---:|---:|---:|
+| RLT | tactile 미사용 | 기존 RLT2 | 0.059761459 | 기준 |
+| Self-only | mean/std (과거) | 4 | 0.092136257 | +54.17% |
+| Cross-only | mean/std (과거) | 4 | 0.090131 | +50.82% |
+| Alternating | mean/std (과거) | 4 | 0.085492 | +43.06% |
+| Self-only | mean/std (과거) | 2 | 0.081193840 | +35.86% |
+| Self-only, modality-on | mean/std (과거) | 2 | 0.080929551 | +35.42% |
+| **Self-only, rawclip30** | **clip(raw/30,-1,1)** | **2** | **0.059127821** | **−1.06%** |
+
+Rawclip30은 같은 modality-off self2 mean/std보다 **27.18% 낮은 MSE**를 보였다.
+Paired 원본 trajectory-bootstrap95% 구간은 MSE차이(rawclip−mean/std)
+**[-0.033622,-0.011102]**로0을 포함하지 않는다. RLT와의 차이는−0.000633638,
+95% 구간 **[-0.003001,+0.001725]**로0을 포함하므로 RLT보다 우수하다고 확정하지 않는다.
+Seed0 한 번의 결과이며 seed 변동성은 측정하지 않았다. 이전 test 결과를 본 후 진행한
+탐색적 후속 비교이고 online control 성능을 측정한 실험이 아니다.
+
+모든 비교 결과의16trajectory별 유효 target 수가 같고 총248112elements이다.
+주 MSE를 trajectory별 값으로 재집계해 일치함을 확인했다. 새 checkpoint 선택 seal은
+14:01:37 UTC에 완료됐고 test export는14:01:38 UTC에 시작됐다.
+전처리가 입력 표현과 reconstruction loss 스케일을 함께 바꾸므로 개선을 clipping,
+성분별 재가중치 제거, visual/tactile loss 균형 중 하나의 효과로 특정할 수 없다.
+
+### 앞으로의 코드 정책
+
+- 모든 Assembly config는 `tactile_preprocessing={"mode":"raw_clip","scale":30.0}`를 명시한다.
+  생략해도 동일하게 동작한다. `standardize` 모드는 거부하며 tactile mean/std 입력
+  경로는 제거했다. Encoder 입력과 decoder target은 같은 변환된 batch field다.
+- 새 protocol 준비는 state/action 통계만 계산한다. 기존 protocol의 역사적 tactile
+  통계 필드는 보존하지만 사용하지 않으며, 기존 데이터·split·cache를 재생성하지 않는다.
+- 전처리 metadata는 checkpoint/latent identity에 항상 기록한다. 과거 mean/std
+  checkpoint로 새 입력의 latent를 export/resume하는 것은 mismatch로 차단한다.
+  과거 실행의 artifact와 source/config snapshot은 보존한다.
+- 이 정책 변경은 새로운 학습·GPU 실행·test 평가를 시작하지 않았다. 현재 T-Rex
+  deformation `/255` 처리에는 적용하지 않는다.
+
+실행 근거(서버 로컬, Git-ignored):
+
+- [최종 보고서](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/final_report.md)
+- [최종 집계·paired bootstrap](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/summary.json)
+- [실제 완료 상태](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/status.json)
+- [선택 checkpoint seal](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/final_selections.json)
+- [새 기본 정책 CPU 검증](../../experiments/trlt/3dtacdex_assembly/clipping_default_validation/summary.json)

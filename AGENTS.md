@@ -668,3 +668,66 @@ This is a historical handoff, not a live process-status report. Verify later art
   evaluation was performed to review results. Preserve exploratory designation
   (follow-up after previous test review); never restart/duplicate the completed
   queue or rebuild the feature cache automatically.
+
+### User-authorized Assembly self2 rawclip30 follow-up: 2026-11-19
+
+- User selected tactile input/target `clip(raw/30,-1,1)`, lambda_tactile1,
+  modality-off self-only2layers; other executed self2 settings unchanged:
+  seed0,Stage A8000/batch64/micro64,Stage B defaults,online W&B10.
+  Config: `configs/trlt/3dtacdex_assembly/normalization/trlt_self_only_2layer_rawclip30.json`.
+- `AssemblyDataset` and CLI accept optional `tactile_preprocessing`; raw_clip
+  is recorded separately from unchanged saved state/action statistics in
+  checkpoint/latent provenance. Legacy default identities stay unchanged;
+  mismatch checks reject rawclip/standardize and differing scales both ways.
+  No trajectory/taxel removed; shared7402-anchor visual cache reused.
+- Prepared9-stage run:
+  `experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/`.
+  Tmux socket `trlt-runs`, session `trlt-assembly-self2-rawclip30-seed0`.
+  GPU preflight,Stage A,exports,Stage B,seal,test export/evaluation,report.
+  Inspect actual status/events/processes before launch/recovery or progress claims;
+  never duplicate/restart from this preparation record. Fresh seed0,no resume.
+- CPU evidence: `experiments/trlt/3dtacdex_assembly/rawclip30_validation/`:
+  20regression cases,Ruff,10actual transformed queries,8worker equivalence
+  queries,7CLI dry runs passed. Historical reporter replay is not a new result.
+  Preserve exploratory designation; new loss scales differ from old mean/std.
+
+- Rawclip30 queue actually launched at2026-11-19T10:51:10Z onGPU0 in the
+  session above. Initial source/config/input/GPU-idle guards passed; first
+  preflight initialized the real14819train/3472validation model. Consult
+  events/logs for later optimizer updates and main training; launch alone is
+  not evidence of a completed preflight or benchmark.
+
+- Rawclip30 GPU preflight actually passed1optimizer update and all3472validation
+  queries onGPU0 at64/64/1; checkpoint provenance confirms raw_clip scale30.
+  Main fresh Stage A started at2026-11-19T10:53:36Z. Evidence:
+  run `gpu_preflight_observation.json`; CPU validation `summary.json`.
+  This is not an8000-step/final-evaluation completion claim.
+
+### Assembly tactile clipping-only policy and rawclip30 completion: 2026-11-20
+
+- User selected clip(raw/30,-1,1) permanently for Assembly tactile input and
+  reconstruction target. All7tracked Assembly configs specify raw_clip scale30;
+  omitted settings resolve identically. Standardize mode and tactile mean/std
+  input code are removed. New protocol preparation computes only state/action
+  train statistics; historical immutable tactile statistics remain unused.
+  T-Rex preprocessing and state/action normalization are unaffected.
+- Keep the existing raw_clip provenance spelling for completed rawclip30 cache/
+  checkpoint compatibility. Legacy mean/std checkpoints are rejected against
+  new inputs; reproduce historical pipelines from their saved source/config
+  snapshots, never silently relabel or rebuild historical artifacts.
+- Run `assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z` completed9/9
+  stages at2026-11-19T14:02:41Z (23:02KST). Actual A8000updates,best8000;
+  best B epoch25,last35. Primary test MSE0.059127821 vs standardized self2
+  0.081193840 (-27.18%) and RLT0.059761459 (-1.06%). Rawclip−standardize
+  paired95%CI[-0.033622,-0.011102]; vsRLT[-0.003001,+0.001725] includes0.
+  Same16source trajectories/248112valid action elements; seed0 only,
+  exploratory follow-up. Input representation and loss scale both changed.
+- Actual completion/config/checkpoint/count/selection-timing evidence:
+  run `results_review.json`, `summary.json`, `final_report.md` and events.
+  Integrated results/policy: `docs/trlt/3dtacdex_experiments.md`.
+  Supersedes earlier preflight/main-training-only observations; do not restart.
+- Clipping-only CPU regression evidence:
+  `experiments/trlt/3dtacdex_assembly/clipping_default_validation/`.
+  21regression cases passed; real-data/default/provenance/worker/config checks
+  are recorded in real_data.json. This policy/docs update launches no new GPU
+  job, training, feature extraction or final evaluation.

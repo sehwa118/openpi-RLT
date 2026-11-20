@@ -35,6 +35,21 @@ DEFAULT_TEMPORAL = TemporalConfig(
 )
 
 
+def tactile_preprocessing_config(value=None):
+    """Assembly uses only fixed-scale clipping, selected from train percentiles.
+
+    The default 30 is fixed across splits, never fitted to a query or batch.
+    """
+    if value is None:
+        value = {"mode": "raw_clip", "scale": 30.0}
+    if not isinstance(value, dict) or set(value) != {"mode", "scale"} or value["mode"] != "raw_clip":
+        raise ValueError("tactile_preprocessing requires mode=raw_clip and a positive finite scale")
+    scale = value["scale"]
+    if isinstance(scale, bool) or not isinstance(scale, int | float) or not np.isfinite(scale) or scale <= 0:
+        raise ValueError("tactile_preprocessing scale must be positive and finite")
+    return {"mode": "raw_clip", "scale": float(scale)}
+
+
 def seal(value):
     return dict(value, hash=digest(value))
 
@@ -222,7 +237,6 @@ def prepare_protocol(data_root=DEFAULT_ROOT, protocol_dir=DEFAULT_PROTOCOL, *, s
     for dst, field, mask in (
         ("state", "observation.state", lambda ep: np.ones_like(ep["observation.state"], bool)),
         ("action", "action", lambda ep: ep["action_valid_mask"]),
-        ("tactile", "observation.tactile", lambda ep: ep["observation.tactile_valid_mask"][..., None, None]),
     ):
         norm[dst] = _statistics([ep[field] for ep in train], [mask(ep) for ep in train])
     norm = seal(norm)
@@ -286,8 +300,10 @@ class AssemblyDataset:
         split="train",
         temporal=DEFAULT_TEMPORAL,
         visual_cache=None,
+        tactile_preprocessing=None,
     ):
         self.root = root_path(data_root)
+        self.tactile_preprocessing = tactile_preprocessing_config(tactile_preprocessing)
         directory = root_path(protocol_dir)
         self.source = read_manifest(directory / "source.json")
         if inventory(self.root)["hash"] != self.source["hash"]:
@@ -326,6 +342,7 @@ class AssemblyDataset:
             "feature_cache_hash": getattr(visual_cache, "cache_hash", None),
             "split": split,
         }
+        self.provenance["tactile_preprocessing"] = self.tactile_preprocessing
         if visual_cache is not None:
             meta = visual_cache.manifest["metadata"]
             for key, value in (
@@ -445,7 +462,9 @@ class AssemblyDataset:
             row = q - (t.tactile_history_frames - 1 - slot) * t.tactile_history_stride_frames
             if contiguous(ep, row, q, t):
                 mask = ep["observation.tactile_valid_mask"][row].astype(bool)
-                x = (ep["observation.tactile"][row] - n["tactile"]["mean"]) / n["tactile"]["std"]
+                raw = ep["observation.tactile"][row]
+                mask &= np.isfinite(raw).all(axis=(-2, -1))
+                x = np.clip(raw / self.tactile_preprocessing["scale"], -1.0, 1.0)
                 mask &= np.isfinite(x).all(axis=(-2, -1))
                 tactile[slot, :, :, 0, :] = np.where(mask[:, None, None], x, 0)
                 valid[slot] = mask

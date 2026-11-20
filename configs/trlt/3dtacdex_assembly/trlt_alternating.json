@@ -78,5 +78,9 @@
     "prefix_microbatch_size": 1,
     "num_workers": 2,
     "prefetch_factor": 2
+  },
+  "tactile_preprocessing": {
+    "mode": "raw_clip",
+    "scale": 30.0
   }
 }

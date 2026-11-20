@@ -84,6 +84,7 @@ def test_grouped_protocol_reuse_and_train_statistics(assembly):
     np.testing.assert_allclose(norm["action"]["mean"], mean)
     assert norm["action"]["count"][6] == len(split["splits"]["train"]) * 3
     assert norm["action"]["count"][0] == len(split["splits"]["train"]) * 4
+    assert "tactile" not in norm  # New protocols fit only state/action statistics.
     assert prepare_protocol(root, protocol)["hash"] == read_manifest(protocol / "protocol.json")["hash"]
     with pytest.raises(ValueError, match="differs"):
         prepare_protocol(root, protocol, seed=7)
@@ -293,3 +294,47 @@ def test_native_training_export_probe_evaluation_roundtrip(tmp_path):
     assert report["metrics"]["valid_elements"] == 2 * (3 * 22 - 16)
     assert np.isfinite(report["metrics"]["primary_normalized_episode_macro_mse"])
     assert set(report["metrics"]["group_mse"]) == {"arm", "hand"}
+
+
+def test_raw_clip_input_target_masks_and_provenance(assembly):
+    from openpi.trlt.runner import _check_provenance
+
+    root, protocol = assembly
+    default = AssemblyDataset(root, protocol)
+    explicit_default = AssemblyDataset(root, protocol, tactile_preprocessing={"mode": "raw_clip", "scale": 30})
+    assert default.provenance == explicit_default.provenance
+    np.testing.assert_array_equal(default[1]["tactile"], explicit_default[1]["tactile"])
+    clipped = AssemblyDataset(root, protocol, tactile_preprocessing={"mode": "raw_clip", "scale": 30})
+    assert clipped.provenance["tactile_preprocessing"] == {"mode": "raw_clip", "scale": 30.0}
+    ep = clipped._episode(clipped.queries[0][0])  # noqa: SLF001
+    ep["observation.tactile"][0, 0, 0] = [-60, 3, 60]
+    ep["observation.tactile"][0, 1, 0, 0] = np.inf
+    ep["observation.tactile_valid_mask"][0, 2] = False
+    sample = clipped[0]
+    np.testing.assert_allclose(sample["tactile"][-1, 0, 0, 0], [-1, 0.1, 1])
+    assert not sample["tactile_valid_mask"][:2].any()
+    assert not sample["tactile_valid_mask"][-1, 1:3].any()
+    assert np.all(sample["tactile"][-1, 1:3] == 0)
+    assert np.max(np.abs(sample["tactile"])) <= 1
+    np.testing.assert_array_equal(sample["action_target"], default[0]["action_target"])
+    legacy_provenance = {k: v for k, v in default.provenance.items() if k != "tactile_preprocessing"}
+    for a, b in [(legacy_provenance, clipped.provenance), (clipped.provenance, legacy_provenance)]:
+        with pytest.raises(ValueError, match="tactile_preprocessing"):
+            _check_provenance(a, b, "test")
+    changed = dict(clipped.provenance, tactile_preprocessing={"mode": "raw_clip", "scale": 50.0})
+    with pytest.raises(ValueError, match="tactile_preprocessing"):
+        _check_provenance(clipped.provenance, changed, "test")
+    # Reconstruction target is the same transformed batch field, not native raw.
+    from openpi.models.trlt import tactile_reconstruction_loss
+
+    batch = {k: jnp.asarray(v[None]) for k, v in sample.items() if k in ("tactile", "tactile_valid_mask")}
+    loss, _ = tactile_reconstruction_loss(batch["tactile"], batch)
+    assert float(loss) == 0
+
+
+@pytest.mark.parametrize("value", [{"mode": "raw_clip", "scale": x} for x in [0, -1, float("inf"), float("nan"), True]] + [{"mode": "standardize"}, {"mode": "unknown"}, {"mode": "raw_clip", "scale": 30, "extra": 1}])
+def test_invalid_tactile_preprocessing_rejected(value):
+    from openpi.trlt.tacdex_data import tactile_preprocessing_config
+
+    with pytest.raises(ValueError, match="tactile_preprocessing"):
+        tactile_preprocessing_config(value)

@@ -620,3 +620,9 @@ Assembly self attention 2층 후속 실험도 2026-11-19 03:26 UTC에 평가까�
 Assembly self2 modality-on 후속 실험은 2026-11-19 07:06 UTC에 최종 평가까지
 완료했다. 주 MSE 0.080930으로 off의0.081194보다0.33% 낮지만, paired trajectory
 95% 차이 구간이0을 포함한다. [Modality ON/OFF 완료 결과](3dtacdex_experiments.md#self-attention-2층-modality-embedding-onoff-완료-결과-2026-11-19)를 참조한다.
+
+
+Assembly tactile의 현재 기본 전처리는 **clip(raw/30,-1,1)**이며 tactile mean/std
+경로는 제거했다(state/action 표준화 유지). Self-only2layers rawclip30 결과는
+주 MSE0.059127821로 기존 self2 대비27.18% 감소했으며 RLT와의 우열은 불확실하다.
+[통합 결과·정규화 정책·실행 근거](3dtacdex_experiments.md#rawclip30-완료-결과-및-tactile-전처리-기본-정책-2026-11-20-확인)를 참조한다.

@@ -103,6 +103,13 @@ def main(argv=None):
     if dataset_kind not in ("trex_squeeze", "3dtacdex_assembly"):
         raise ValueError("Unknown dataset_kind")
     assembly = dataset_kind == "3dtacdex_assembly"
+    tactile_preprocessing = raw.get("tactile_preprocessing")
+    if assembly:
+        from openpi.trlt.tacdex_data import tactile_preprocessing_config
+
+        tactile_preprocessing = tactile_preprocessing_config(tactile_preprocessing)
+    elif tactile_preprocessing is not None:
+        raise ValueError("tactile_preprocessing override is Assembly-only")
     if assembly:
         if (
             config.state_dim != 22
@@ -152,6 +159,7 @@ def main(argv=None):
                     "representation": asdict(representation),
                     "probe": asdict(probe),
                     "tracking": tracking,
+                    "tactile_preprocessing": tactile_preprocessing,
                     "arguments": vars(args),
                     "status": "plan-only; no model initialization or training",
                 },
@@ -220,6 +228,7 @@ def main(argv=None):
                     split=split,
                     temporal=temporal,
                     visual_cache=cache,
+                    tactile_preprocessing=tactile_preprocessing,
                 )
             return TrexDataset(
                 data_root,

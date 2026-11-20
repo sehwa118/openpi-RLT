@@ -89,8 +89,9 @@ SHARED_PROVENANCE_KEYS = (
 
 
 def _check_provenance(expected, actual, label):
-    if expected.get("geometry_hash") != actual.get("geometry_hash"):
-        raise ValueError(f"{label} provenance mismatch: geometry_hash")
+    for key in ("geometry_hash", "tactile_preprocessing"):
+        if expected.get(key) != actual.get(key):
+            raise ValueError(f"{label} provenance mismatch: {key}")
     for key in SHARED_PROVENANCE_KEYS:
         value = expected.get(key)
         if value is not None and digest(actual.get(key)) != digest(value):

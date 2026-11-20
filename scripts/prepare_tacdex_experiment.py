@@ -23,6 +23,7 @@ def main():
     from openpi.trlt.tacdex_data import grouped_split
     from openpi.trlt.tacdex_data import inventory
     from openpi.trlt.tacdex_data import prepare_protocol
+    from openpi.trlt.tacdex_data import tactile_preprocessing_config
 
     raw = json.loads(root_path(args.config).read_text())
     if raw["dataset_kind"] != "3dtacdex_assembly":
@@ -45,6 +46,7 @@ def main():
             for name, ids in split["splits"].items()
         },
         "training_steps": 0,
+        "tactile_preprocessing": tactile_preprocessing_config(raw.get("tactile_preprocessing")),
     }
     if args.command == "prepare":
         result["protocol"] = prepare_protocol(root, destination, seed=raw.get("split_seed", 42), temporal=temporal)
