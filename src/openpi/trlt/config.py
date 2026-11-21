@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -176,6 +177,7 @@ class ProbeConfig:
     warmup_steps: int = 0
     min_lr_ratio: float = 0.1
     gradient_clip: float = 1.0
+    variant_tag: str | None = None
 
     def __post_init__(self):
         if min(self.hidden_dim, self.depth, self.action_dim, self.horizon, self.batch_size) <= 0:
@@ -205,6 +207,12 @@ class ProbeConfig:
                 raise ValueError("part_attention requires positive finite mlp_ratio")
             if self.action_dim not in (58, 22):
                 raise ValueError("part_attention supports 58D T-Rex and 22D OMY+LEAP action dimensions")
+        if self.variant_tag is not None and (
+            not isinstance(self.variant_tag, str)
+            or "__" in self.variant_tag
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?", self.variant_tag)
+        ):
+            raise ValueError("variant_tag must be a lowercase alphanumeric/underscore/hyphen identifier without '__'")
 
 
 # Tensor batch contract consumed by model and runner:
@@ -263,11 +271,16 @@ def probe_config_dict(config: ProbeConfig) -> dict:
             value.pop("warmup_steps")
     if config.gradient_clip == 1.0:
         value.pop("gradient_clip")
+    if config.variant_tag is None:
+        value.pop("variant_tag")
     return value
 
 
 def probe_variant_name(config: ProbeConfig) -> str:
     """Return canonical directory/model suffix identifying the Stage B probe variant."""
-    if config.architecture == "part_attention":
-        return f"part_attention_{config.attention_mask_mode}"
-    return config.architecture
+    base = (
+        f"part_attention_{config.attention_mask_mode}"
+        if config.architecture == "part_attention"
+        else config.architecture
+    )
+    return f"{base}_{config.variant_tag}" if config.variant_tag else base

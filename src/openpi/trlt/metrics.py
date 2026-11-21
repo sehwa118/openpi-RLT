@@ -205,6 +205,23 @@ def _aggregate_metrics(metrics):
     return result
 
 
+def _paired_bootstrap(differences, denominator, rng, bootstrap_samples):
+    delta = float(np.mean(differences)) if differences else None
+    ci = None
+    if differences and bootstrap_samples:
+        values = np.asarray(differences)
+        boot = values[rng.integers(len(values), size=(bootstrap_samples, len(values)))].mean(axis=1)
+        ci = np.percentile(boot, (2.5, 97.5)).tolist()
+    return {
+        "delta_normalized_episode_macro_mse": delta,
+        "relative_change_percent": 100 * delta / denominator
+        if delta is not None and denominator is not None and abs(denominator) > 1e-12
+        else None,
+        "paired_episode_bootstrap_95_ci": ci,
+        "episode_count": len(differences),
+    }
+
+
 def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=42, baseline_model="rlt_original"):
     """Summarize all seeds without selecting a favorable test seed/checkpoint."""
     records = [json.loads(Path(path).read_text()) for path in paths]
@@ -246,6 +263,8 @@ def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=4
         if model == baseline_model:
             continue
         pairs = {}
+        per_seed_diffs = {}
+        ref_primaries = {}
         for training_seed in sorted(set(rows) & set(baseline)):
             current, ref = rows[training_seed].get("metrics", {}), baseline[training_seed].get("metrics", {})
             if not current.get("episodes") or not ref.get("episodes"):
@@ -269,27 +288,30 @@ def summarize_results(paths, output_path=None, *, bootstrap_samples=2000, seed=4
                 b = baseline[training_seed].get("provenance", {}).get(field)
                 if a != b:
                     raise ValueError(f"Paired comparison mismatched {field}")
-            differences = []
+            ep_diffs = {}
             for ep in current["episodes"]:
                 a, b = current["episodes"][ep], ref["episodes"][ep]
                 if a["valid_elements"] != b["valid_elements"]:
                     raise ValueError("Paired comparison requires identical valid target counts")
                 if a.get("normalized_mse") is not None and b.get("normalized_mse") is not None:
-                    differences.append(a["normalized_mse"] - b["normalized_mse"])
-            delta = float(np.mean(differences)) if differences else None
-            denominator = ref.get("primary_normalized_episode_macro_mse")
-            ci = None
-            if differences and bootstrap_samples:
-                values = np.asarray(differences)
-                boot = values[rng.integers(len(values), size=(bootstrap_samples, len(values)))].mean(axis=1)
-                ci = np.percentile(boot, (2.5, 97.5)).tolist()
-            pairs[training_seed] = {
-                "delta_normalized_episode_macro_mse": delta,
-                "relative_change_percent": 100 * delta / denominator
-                if delta is not None and denominator is not None and abs(denominator) > 1e-12
-                else None,
-                "paired_episode_bootstrap_95_ci": ci,
-                "episode_count": len(differences),
+                    ep_diffs[ep] = a["normalized_mse"] - b["normalized_mse"]
+            ref_primary = ref.get("primary_normalized_episode_macro_mse")
+            pairs[training_seed] = _paired_bootstrap(list(ep_diffs.values()), ref_primary, rng, bootstrap_samples)
+            if ep_diffs:
+                per_seed_diffs[training_seed] = ep_diffs
+                ref_primaries[training_seed] = ref_primary
+        if len(per_seed_diffs) > 1:
+            valid_seeds = sorted(per_seed_diffs)
+            ep_sets = [set(per_seed_diffs[s]) for s in valid_seeds]
+            if any(ep_set != ep_sets[0] for ep_set in ep_sets[1:]):
+                raise ValueError("Multi-seed paired comparison requires identical episode IDs")
+            shared_eps = sorted(ep_sets[0], key=lambda k: (0, int(k)) if k.isdigit() else (1, k))
+            mean_diffs = [float(np.mean([per_seed_diffs[s][ep] for s in valid_seeds])) for ep in shared_eps]
+            valid_refs = [v for v in (ref_primaries[s] for s in valid_seeds) if v is not None and np.isfinite(v)]
+            mean_ref = float(np.mean(valid_refs)) if len(valid_refs) == len(valid_seeds) else None
+            pairs["seed_mean"] = {
+                "seeds": valid_seeds,
+                **_paired_bootstrap(mean_diffs, mean_ref, rng, bootstrap_samples),
             }
         summary[paired_key][model] = pairs
     if output_path:

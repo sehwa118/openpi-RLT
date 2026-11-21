@@ -995,7 +995,9 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
     rep_model = provenance.get("model")
     probe_name = probe_variant_name(config)
     eval_model = (
-        rep_model if config.architecture == "mlp" else (f"{rep_model}__{probe_name}" if rep_model else probe_name)
+        rep_model
+        if config.architecture == "mlp" and not config.variant_tag
+        else (f"{rep_model}__{probe_name}" if rep_model else probe_name)
     )
     predict = jax.jit(
         lambda batch: model.apply(

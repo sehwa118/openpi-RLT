@@ -274,7 +274,9 @@ def main(argv=None):
                 force_cache_rebuild=args.force_cache_rebuild,
             ).manifest
     elif args.command == "train-probe":
-        probe_suffix = "probe" if probe.architecture == "mlp" else f"probe_{probe_variant_name(probe)}"
+        probe_suffix = (
+            "probe" if probe.architecture == "mlp" and not probe.variant_tag else f"probe_{probe_variant_name(probe)}"
+        )
         result = train_action_probe(
             LatentDataset(args.train_latents),
             LatentDataset(args.validation_latents),
@@ -290,7 +292,11 @@ def main(argv=None):
             log_dir=args.log_dir or f"{logs}/{probe_suffix}",
         )
     else:
-        eval_suffix = "evaluation" if probe.architecture == "mlp" else f"evaluation_{probe_variant_name(probe)}"
+        eval_suffix = (
+            "evaluation"
+            if probe.architecture == "mlp" and not probe.variant_tag
+            else f"evaluation_{probe_variant_name(probe)}"
+        )
         result = evaluate_action_probe(
             LatentDataset(args.latents),
             args.probe_checkpoint,

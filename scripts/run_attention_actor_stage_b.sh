@@ -19,6 +19,7 @@ CACHE_ROOT=""
 PYTHON_BIN="python"
 DEVICE="0"
 SEEDS="0 1 2"
+LATENT_SEED=""
 VARIANTS="mlp resmlp part_attention_full part_attention_kinematic part_attention_hierarchical"
 WANDB_MODE="disabled"
 REP_MODEL=""
@@ -47,8 +48,13 @@ Optional:
   --python BIN           Python executable (default: python)
   --device IDX           Single GPU index passed to --device (default: 0)
   --seeds "0 1 2"        Space-separated seeds to run (default: "0 1 2")
+  --latent-seed N        Override seed subdirectory under --latent-root (e.g. 0 when running multi-seed Stage B
+                         on a single seed0 frozen latent cache; default: match each Stage B seed)
   --variants "..."       Space-separated Stage B variants to run
-                         (default: "mlp resmlp part_attention_full part_attention_kinematic part_attention_hierarchical")
+                         (default: "mlp resmlp part_attention_full part_attention_kinematic part_attention_hierarchical";
+                          Assembly also supports: resmlp_d160, part_attention_hierarchical_d64,
+                          part_attention_hierarchical_d64_drop01, part_attention_kinematic_d64,
+                          part_attention_hierarchical_drop01)
   --rep-model NAME       Stage A representation model name in LatentDataset provenance
                          (default: trlt_cross_only for trex_squeeze, trlt_self_only for 3dtacdex_assembly)
   --wandb MODE           disabled | offline | online (default: disabled)
@@ -99,6 +105,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --seeds)
       SEEDS="${2:-}"
+      shift 2
+      ;;
+    --latent-seed)
+      LATENT_SEED="${2:-}"
       shift 2
       ;;
     --variants)
@@ -189,6 +199,11 @@ if [[ -z "${DEVICE}" || "${DEVICE}" == "cpu" || "${DEVICE}" == *","* ]]; then
   exit 1
 fi
 
+if [[ -n "${LATENT_SEED}" && ! "${LATENT_SEED}" =~ ^[0-9]+$ ]]; then
+  echo "Error: --latent-seed must be a nonnegative integer (got '${LATENT_SEED}')." >&2
+  exit 1
+fi
+
 CURRENT_USER="$(id -un)"
 
 validate_writable_path() {
@@ -239,6 +254,9 @@ config_for_variant() {
     resmlp)
       echo "${CONFIG_DIR}/probe_resmlp.json"
       ;;
+    resmlp_d160)
+      echo "${CONFIG_DIR}/probe_resmlp_d160.json"
+      ;;
     part_attention_full)
       echo "${CONFIG_DIR}/probe_part_attn_full.json"
       ;;
@@ -247,6 +265,18 @@ config_for_variant() {
       ;;
     part_attention_hierarchical)
       echo "${CONFIG_DIR}/probe_part_attn_hierarchical.json"
+      ;;
+    part_attention_hierarchical_drop01)
+      echo "${CONFIG_DIR}/probe_part_attn_hierarchical_drop01.json"
+      ;;
+    part_attention_hierarchical_d64)
+      echo "${CONFIG_DIR}/probe_part_attn_hierarchical_d64.json"
+      ;;
+    part_attention_hierarchical_d64_drop01)
+      echo "${CONFIG_DIR}/probe_part_attn_hierarchical_d64_drop01.json"
+      ;;
+    part_attention_kinematic_d64)
+      echo "${CONFIG_DIR}/probe_part_attn_kinematic_d64.json"
       ;;
     *)
       echo "Error: unknown Stage B variant '$1'." >&2
@@ -272,21 +302,29 @@ read -r -a VARIANT_LIST <<< "${VARIANTS}"
 
 HAS_MLP=0
 HAS_RESMLP=0
+HAS_RESMLP_D160=0
 EVAL_METRICS=()
 
 for variant in "${VARIANT_LIST[@]}"; do
-  config_for_variant "${variant}" >/dev/null
+  cfg_path="$(config_for_variant "${variant}")"
+  if [[ ! -f "${cfg_path}" ]]; then
+    echo "Error: config not found for variant '${variant}': ${cfg_path}" >&2
+    exit 1
+  fi
   if [[ "${variant}" == "mlp" ]]; then
     HAS_MLP=1
   elif [[ "${variant}" == "resmlp" ]]; then
     HAS_RESMLP=1
+  elif [[ "${variant}" == "resmlp_d160" ]]; then
+    HAS_RESMLP_D160=1
   fi
 done
 
 for seed in "${SEED_LIST[@]}"; do
-  TRAIN_LATENTS="${LATENT_ROOT%/}/seed${seed}/train"
-  VAL_LATENTS="${LATENT_ROOT%/}/seed${seed}/validation"
-  TEST_LATENTS="${LATENT_ROOT%/}/seed${seed}/test"
+  LATENT_SEED_FOR_RUN="${LATENT_SEED:-${seed}}"
+  TRAIN_LATENTS="${LATENT_ROOT%/}/seed${LATENT_SEED_FOR_RUN}/train"
+  VAL_LATENTS="${LATENT_ROOT%/}/seed${LATENT_SEED_FOR_RUN}/validation"
+  TEST_LATENTS="${LATENT_ROOT%/}/seed${LATENT_SEED_FOR_RUN}/test"
   SEAL_PATH="${OUT_CLEAN}/logs/seed${seed}/stage_b_selections.json"
   SEAL_PROBE_ARGS=()
 
@@ -405,5 +443,21 @@ if [[ "${HAS_RESMLP}" -eq 1 ]]; then
     else
       "${SUM_RESMLP_CMD[@]}"
     fi
+  fi
+fi
+
+if [[ "${HAS_RESMLP_D160}" -eq 1 ]]; then
+  SUM_RESMLP_D160_CMD=(
+    "${PYTHON_BIN}" "${REPO_ROOT}/scripts/trex_offline.py" summarize
+    "${EVAL_METRICS[@]}"
+    --baseline "${REP_MODEL}__resmlp_d160"
+    --output "${OUT_CLEAN}/logs/summary_vs_resmlp_d160.json"
+  )
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf '[dry-run summarize]'
+    printf ' %q' "${SUM_RESMLP_D160_CMD[@]}"
+    printf '\n'
+  else
+    "${SUM_RESMLP_D160_CMD[@]}"
   fi
 fi

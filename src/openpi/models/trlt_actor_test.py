@@ -16,6 +16,7 @@ from openpi.models.trlt_actor import ResMLPActionProbe
 from openpi.models.trlt_actor import build_action_probe
 from openpi.models.trlt_actor import part_attention_mask
 from openpi.models.trlt_actor import part_specs_for_dim
+from openpi.trlt.cache import write_json
 from openpi.trlt.config import ProbeConfig
 from openpi.trlt.config import TemporalConfig
 from openpi.trlt.config import digest
@@ -29,6 +30,9 @@ from openpi.trlt.runner import evaluate_action_probe
 from openpi.trlt.runner import probe_loss
 from openpi.trlt.runner import train_action_probe
 from openpi.trlt.runner_test import tiny
+from openpi.trlt.tacdex_data import seal
+from openpi.trlt.tacdex_experiment import seal_probe_selections
+from openpi.trlt.tacdex_experiment import validate_selection_seal
 
 
 class FrozenLatentFixture(SyntheticDataset):
@@ -572,43 +576,133 @@ def test_assembly_22d_parameter_parity_and_dry_run_configs(capsys):
     assert rel_diff < 0.005
 
 
-def test_assembly_elementwise_mask_and_action_groups(tmp_path):
-    class AssemblyLatentFixture(FrozenLatentFixture):
-        def __init__(self, split: str, *, size: int = 4):
-            super().__init__(split, size=size, latent_dim=16)
-            norm = {
-                "state": {"mean": [0.0] * 22, "std": [1.0] * 22},
-                "action": {"mean": [0.0] * 22, "std": [1.0] * 22},
-                "action_groups": {"arm": list(range(6)), "hand": list(range(6, 22))},
+def test_assembly_22d_lightweight_and_regularized_configs(capsys):
+    script_path = root_path("scripts/trex_offline.py")
+    spec = importlib.util.spec_from_file_location("trex_offline", script_path)
+    trex_offline = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(trex_offline)
+
+    z = jnp.zeros((2, 1, 512), dtype=jnp.float32)
+    prop = jnp.zeros((2, 22), dtype=jnp.float32)
+    age = jnp.zeros((2,), dtype=jnp.float32)
+
+    expected = {
+        "probe_resmlp_d160.json": ("resmlp", "full", "resmlp_d160", 200_386, 0.0),
+        "probe_part_attn_hierarchical_d64.json": (
+            "part_attention",
+            "hierarchical",
+            "part_attention_hierarchical_d64",
+            201_090,
+            0.0,
+        ),
+        "probe_part_attn_hierarchical_d64_drop01.json": (
+            "part_attention",
+            "hierarchical",
+            "part_attention_hierarchical_d64_drop01",
+            201_090,
+            0.1,
+        ),
+        "probe_part_attn_kinematic_d64.json": (
+            "part_attention",
+            "kinematic",
+            "part_attention_kinematic_d64",
+            201_090,
+            0.0,
+        ),
+        "probe_part_attn_hierarchical_drop01.json": (
+            "part_attention",
+            "hierarchical",
+            "part_attention_hierarchical_drop01",
+            721_602,
+            0.1,
+        ),
+    }
+    counts = {}
+    for filename, (arch, mask_mode, variant_name, expected_count, dropout) in expected.items():
+        cfg_path = root_path(f"configs/trlt/3dtacdex_assembly/attention_actor/{filename}")
+        raw = json.loads(cfg_path.read_text())
+        assert raw["tracking"]["mode"] == "disabled"
+        assert raw["dataset_kind"] == "3dtacdex_assembly"
+        cfg = ProbeConfig(**raw["probe"])
+        assert probe_variant_name(cfg) == variant_name
+        assert cfg.dropout_rate == dropout
+        params = build_action_probe(cfg).init(jax.random.PRNGKey(0), z, prop, age, train=False)["params"]
+        counts[filename] = _param_count(params)
+        assert counts[filename] == expected_count
+
+        trex_offline.main(
+            [
+                "train-probe",
+                "--config",
+                str(cfg_path),
+                "--train-latents",
+                "/tmp/t",
+                "--validation-latents",
+                "/tmp/v",
+                "--dry-run",
+            ]
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["probe"]["architecture"] == arch
+        assert payload["probe"]["attention_mask_mode"] == mask_mode
+        assert payload["probe"]["action_dim"] == 22
+        assert payload["probe"]["horizon"] == 3
+        assert payload["tracking"]["mode"] == "disabled"
+
+    rel_diff = (
+        abs(counts["probe_resmlp_d160.json"] - counts["probe_part_attn_hierarchical_d64.json"])
+        / counts["probe_part_attn_hierarchical_d64.json"]
+    )
+    assert rel_diff < 0.005
+
+    assert "variant_tag" not in probe_config_dict(ProbeConfig())
+    assert probe_variant_name(ProbeConfig(variant_tag="alt")) == "mlp_alt"
+    for bad_tag in ("", "bad/tag", "a__b", "UpperCase"):
+        with pytest.raises(ValueError, match="variant_tag"):
+            ProbeConfig(variant_tag=bad_tag)
+
+
+class _AssemblyLatentFixture(FrozenLatentFixture):
+    def __init__(self, split: str, *, size: int = 4):
+        super().__init__(split, size=size, latent_dim=16)
+        norm = {
+            "state": {"mean": [0.0] * 22, "std": [1.0] * 22},
+            "action": {"mean": [0.0] * 22, "std": [1.0] * 22},
+            "action_groups": {"arm": list(range(6)), "hand": list(range(6, 22))},
+            "split_hash": "assembly-split-h",
+        }
+        norm["hash"] = digest(norm)
+        self.normalization = norm
+        self.provenance.update(
+            {
+                "dataset_kind": "3dtacdex_assembly",
+                "model": "trlt_self_only",
+                "representation_seed": 0,
                 "split_hash": "assembly-split-h",
+                "normalization_hash": norm["hash"],
+                "temporal": {**vars(TemporalConfig()), "fps": 5.0, "action_horizon_frames": 3},
             }
-            norm["hash"] = digest(norm)
-            self.normalization = norm
-            self.provenance.update(
-                {
-                    "dataset_kind": "3dtacdex_assembly",
-                    "model": "trlt_self_only",
-                    "normalization_hash": norm["hash"],
-                    "temporal": {**vars(TemporalConfig()), "fps": 5.0, "action_horizon_frames": 3},
-                }
-            )
+        )
 
-        def __getitem__(self, index: int):
-            sample = super().__getitem__(index)
-            rng = np.random.default_rng(2000 + index)
-            sample["proprioception"] = rng.normal(0.0, 0.5, size=(22,)).astype(np.float32)
-            target = rng.normal(0.0, 0.5, size=(3, 22)).astype(np.float32)
-            mask = np.ones((3, 22), dtype=bool)
-            if index % 2 == 1:
-                mask[:, 6:] = False
-                target[:, 6:] = 0.0
-            sample["action_target"] = target
-            sample["action_valid_mask"] = mask
-            return sample
+    def __getitem__(self, index: int):
+        sample = super().__getitem__(index)
+        rng = np.random.default_rng(2000 + index)
+        sample["proprioception"] = rng.normal(0.0, 0.5, size=(22,)).astype(np.float32)
+        target = rng.normal(0.0, 0.5, size=(3, 22)).astype(np.float32)
+        mask = np.ones((3, 22), dtype=bool)
+        if index % 2 == 1:
+            mask[:, 6:] = False
+            target[:, 6:] = 0.0
+        sample["action_target"] = target
+        sample["action_valid_mask"] = mask
+        return sample
 
-    train_ds = AssemblyLatentFixture("train", size=4)
-    val_ds = AssemblyLatentFixture("validation", size=2)
-    test_ds = AssemblyLatentFixture("test", size=2)
+
+def test_assembly_elementwise_mask_and_action_groups(tmp_path):
+    train_ds = _AssemblyLatentFixture("train", size=4)
+    val_ds = _AssemblyLatentFixture("validation", size=2)
+    test_ds = _AssemblyLatentFixture("test", size=2)
     cfg = ProbeConfig(
         architecture="part_attention",
         attention_mask_mode="hierarchical",
@@ -646,3 +740,81 @@ def test_assembly_elementwise_mask_and_action_groups(tmp_path):
     assert set(report["metrics"]["group_mse"]) == {"arm", "hand"}
     assert np.isfinite(report["metrics"]["group_mse"]["arm"])
     assert np.isfinite(report["metrics"]["group_mse"]["hand"])
+
+
+def test_assembly_multiseed_shared_latent_seal_and_seed_mean_summary(tmp_path):
+    train_ds = _AssemblyLatentFixture("train", size=4)
+    val_ds = _AssemblyLatentFixture("validation", size=2)
+    test_ds = _AssemblyLatentFixture("test", size=4)
+    protocol_dir = tmp_path / "protocol"
+    protocol = seal(
+        {
+            "split_hash": train_ds.provenance["split_hash"],
+            "normalization_hash": train_ds.normalization["hash"],
+            "query_manifest_hash": train_ds.provenance["query_manifest_hash"],
+        }
+    )
+    write_json(protocol_dir / "protocol.json", protocol)
+
+    configs = {
+        "mlp": ProbeConfig(hidden_dim=8, depth=2, action_dim=22, horizon=3, batch_size=2, max_epochs=2, patience=5),
+        "part_attention_hierarchical_d64": ProbeConfig(
+            architecture="part_attention",
+            attention_mask_mode="hierarchical",
+            hidden_dim=16,
+            depth=2,
+            num_heads=4,
+            dropout_rate=0.1,
+            action_dim=22,
+            horizon=3,
+            batch_size=2,
+            max_epochs=2,
+            patience=5,
+            learning_rate=5e-4,
+            lr_schedule="cosine",
+            warmup_steps=1,
+            variant_tag="d64",
+        ),
+    }
+
+    metrics_paths = []
+    for seed in (0, 1):
+        best_ckpts = {}
+        for variant, cfg in configs.items():
+            trained = train_action_probe(
+                train_ds,
+                val_ds,
+                cfg,
+                tmp_path / f"seed{seed}" / variant / "ckpt",
+                seed=seed,
+                max_steps=2,
+                log_dir=tmp_path / f"seed{seed}" / variant / "logs",
+                num_workers=0,
+                progress=False,
+            )
+            best_ckpts[variant] = trained["best_checkpoint"]
+        seal_path = tmp_path / f"seed{seed}" / "stage_b_selections.json"
+        sealed = seal_probe_selections(best_ckpts, seal_path, protocol_dir=protocol_dir, seed=seed)
+        assert sealed["kind"] == "stage_b_probe_selection_seal"
+        for variant, ckpt in best_ckpts.items():
+            validate_selection_seal(seal_path, protocol_dir=protocol_dir, checkpoint=ckpt, allow_probe_seal=True)
+            eval_dir = tmp_path / f"seed{seed}" / variant / "eval"
+            evaluate_action_probe(test_ds, ckpt, train_ds.normalization, eval_dir, batch_size=2)
+            metrics_paths.append(eval_dir / "metrics.json")
+
+    summary = summarize_results(
+        metrics_paths, tmp_path / "summary.json", bootstrap_samples=50, baseline_model="trlt_self_only"
+    )
+    model_key = "trlt_self_only__part_attention_hierarchical_d64"
+    assert set(summary["models"][model_key]["seeds"]) == {"0", "1"}
+    assert summary["models"][model_key]["std"] is not None
+    assert np.isfinite(summary["models"][model_key]["std"])
+    assert summary["models"][model_key]["missing_expected_seeds"] == ["2"]
+
+    pair_entry = summary["paired_vs_baseline"][model_key]
+    assert set(pair_entry) == {"0", "1", "seed_mean"}
+    seed_mean = pair_entry["seed_mean"]
+    assert seed_mean["seeds"] == ["0", "1"]
+    assert seed_mean["episode_count"] == 2
+    assert np.isfinite(seed_mean["delta_normalized_episode_macro_mse"])
+    assert len(seed_mean["paired_episode_bootstrap_95_ci"]) == 2
