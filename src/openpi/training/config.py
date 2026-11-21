@@ -24,6 +24,7 @@ import openpi.policies.agilexbag_image_policy as agilexbag_image_policy
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.omy_leap_policy as omy_leap_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -39,6 +40,14 @@ Filter: TypeAlias = nnx.filterlib.Filter
 
 AGILEX_LEROBOT_REPO = os.environ.get("AGILEX_LEROBOT_REPO", "your_hf_username/agilex_ethernet_lerobot")
 AGILEX_PI05_BASE_CKPT = os.environ.get("AGILEX_PI05_BASE_CKPT", "gs://openpi-assets/checkpoints/pi05_base/params")
+
+# OMY arm + LEAP hand rig (SHAPE_UP_Tactile tactile_rec -> LeRobot v2.1).
+OMY_LEAP_LEROBOT_REPO = os.environ.get("OMY_LEAP_LEROBOT_REPO", "local/omy_leap_sync_test")
+OMY_LEAP_PI05_BASE_CKPT = os.environ.get("OMY_LEAP_PI05_BASE_CKPT", "gs://openpi-assets/checkpoints/pi05_base/params")
+# Manifest values the policy runner must match. Update them whenever the served checkpoint or
+# its norm stats change.
+OMY_LEAP_CHECKPOINT_ID = os.environ.get("OMY_LEAP_CHECKPOINT_ID", "pi05_base-untrained")
+OMY_LEAP_NORM_STATS_ID = os.environ.get("OMY_LEAP_NORM_STATS_ID", "omy_leap_sync_test_20261117")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -414,6 +423,55 @@ class LerobotAgilexBagImageDataConfig(DataConfigFactory):
 
         if self.use_delta_joint_actions:
             delta_action_mask = _transforms.make_bool_mask(6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LerobotOmyLeapDataConfig(DataConfigFactory):
+    """Data config for the OMY arm (6) + LEAP hand (16) rig with a wrist camera (+ optional cam_ext)."""
+
+    # Train on actions relative to the measured state; the server still outputs absolute targets.
+    use_delta_joint_actions: bool = True
+    # Number of leading dims converted to deltas (6 = arm only, 22 = arm + hand).
+    delta_action_dims: int = omy_leap_policy.ACTION_DIM
+    # Cameras stored in the dataset, as `observation.images.<name>`.
+    cameras: Sequence[str] = ("cam_wrist",)
+    default_prompt: str | None = None
+
+    action_sequence_keys: Sequence[str] = ("action",)
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        structure: dict[str, Any] = {
+            "images": {name: f"observation.images.{name}" for name in self.cameras},
+            "state": "observation.state",
+            "actions": "action",
+        }
+        default_prompt = self.default_prompt
+        if self.base_config and self.base_config.prompt_from_task:
+            structure["prompt"] = "prompt"
+            default_prompt = None
+        repack_transforms = _transforms.Group(inputs=[_transforms.RepackTransform(structure)])
+
+        data_transforms = _transforms.Group(
+            inputs=[omy_leap_policy.OmyLeapInputs(model_type=model_config.model_type)],
+            outputs=[omy_leap_policy.OmyLeapOutputs()],
+        )
+        if self.use_delta_joint_actions:
+            delta_action_mask = _transforms.make_bool_mask(self.delta_action_dims)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -1060,6 +1118,32 @@ _CONFIGS = [
         ema_decay=None,
         num_train_steps=100_000,
         num_workers=8,
+    ),
+    #
+    # OMY arm + LEAP hand (wrist camera) fine-tuning config.
+    #
+    TrainConfig(
+        name="pi05_omy_leap",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=50,
+            discrete_state_input=True,
+        ),
+        data=LerobotOmyLeapDataConfig(
+            repo_id=OMY_LEAP_LEROBOT_REPO,
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(OMY_LEAP_PI05_BASE_CKPT),
+        policy_metadata={
+            "manifest": omy_leap_policy.make_manifest(
+                cameras=["cam_wrist"],
+                checkpoint=OMY_LEAP_CHECKPOINT_ID,
+                norm_stats_id=OMY_LEAP_NORM_STATS_ID,
+                pred_horizon=50,
+            )
+        },
+        num_train_steps=30_000,
     ),
     #
     # Debugging configs.
