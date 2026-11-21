@@ -731,3 +731,47 @@ This is a historical handoff, not a live process-status report. Verify later art
   21regression cases passed; real-data/default/provenance/worker/config checks
   are recorded in real_data.json. This policy/docs update launches no new GPU
   job, training, feature extraction or final evaluation.
+
+### User-authorized Assembly rawclip30 self-only4 follow-up: 2026-11-20
+
+- User requested only fusion depth2->4 vs completed rawclip30 self2.
+  Existing `configs/trlt/3dtacdex_assembly/trlt_self_only.json` matches exactly
+  except num_stages:4; input/target raw_clip30,lambda1,modality-off,seed0,
+  A8000/batch64/micro64,Bdefaults,onlineW&B10 unchanged.
+- Prepared9-stage run:
+  `experiments/trlt/3dtacdex_assembly/runs/assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z/`.
+  Socket `trlt-runs`,session `trlt-assembly-self4-rawclip30-seed0`.
+  Preflight,A,exports,B,seal,test export/eval,comparison report. Distinct
+  checkpoint/latent paths; no resume,extra seed or feature extraction.
+- Config/dry-run/report-replay/guard evidence:
+  `experiments/trlt/3dtacdex_assembly/self4_rawclip30_validation/`.
+  Historical report replay is not a new benchmark result. Inspect actual
+  status/events/processes/checkpoint before any current-progress or recovery
+  claim. Never duplicate/restart a queue from this prepared-run record.
+  Preserve exploratory designation after earlier test inspection.
+
+- Self4 rawclip30 queue actually launched at2026-11-20T05:21:19Z (14:21KST),
+  GPU0,session above. Seven CPU CLI dry runs, historical report replay and
+  source/config/input/GPU-idle guards passed. First GPU preflight initialized
+  the real train/validation model. This is launch evidence, not completed
+  preflight/8000updates/final evaluation; inspect actual later artifacts.
+
+- Self4 rawclip30 GPU preflight passed1actual optimizer update + all3472
+  validation queries onGPU0 at64/64/1. Saved metadata confirms fusion4 and
+  raw_clip30. Main Stage A started fresh at2026-11-20T05:23:47Z.
+  Evidence: run `gpu_preflight_observation.json` and validation summary.
+  This does not establish8000-step/final-evaluation completion.
+
+### Completed rawclip30 self4 experiment: verified 2026-11-20
+
+- Run `assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z` completed9/9
+  at2026-11-20T08:50:42Z (17:50KST). Actual A8000,best7888; Bbest epoch14,
+  last24. Primary test MSE0.061742904 vs rawclip30self2 0.059127821 (+4.42%)
+  and RLT0.059761459 (+3.32%). Paired95%CI self4−self2
+  [-0.001400,+0.007499],vsRLT[-0.001875,+0.007694]; both include0.
+- Same16source trajectories/248112valid target elements; sealed before test;
+  actual checkpoint hashes/provenance/config-depth-only difference checked.
+  Evidence: run results_review.json,summary.json,final_report.md. Integrated
+  summary: docs/trlt/3dtacdex_experiments.md. Only seed0,exploratory follow-up.
+  Supersedes launch/preflight-only observations; no restart or new evaluation
+  was performed during this review.

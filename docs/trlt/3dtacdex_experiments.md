@@ -599,6 +599,7 @@ Visual cache와 split, state/action 통계는 동일하게 유지했다. 기존 
 | Self-only | mean/std (과거) | 2 | 0.081193840 | +35.86% |
 | Self-only, modality-on | mean/std (과거) | 2 | 0.080929551 | +35.42% |
 | **Self-only, rawclip30** | **clip(raw/30,-1,1)** | **2** | **0.059127821** | **−1.06%** |
+| Self-only, rawclip30 | clip(raw/30,-1,1) | 4 | 0.061742904 | +3.32% |
 
 Rawclip30은 같은 modality-off self2 mean/std보다 **27.18% 낮은 MSE**를 보였다.
 Paired 원본 trajectory-bootstrap95% 구간은 MSE차이(rawclip−mean/std)
@@ -633,3 +634,65 @@ Seed0 한 번의 결과이며 seed 변동성은 측정하지 않았다. 이전 t
 - [실제 완료 상태](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/status.json)
 - [선택 checkpoint seal](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/final_selections.json)
 - [새 기본 정책 CPU 검증](../../experiments/trlt/3dtacdex_assembly/clipping_default_validation/summary.json)
+
+## Rawclip30 self-only 4-layer 후속 실험 (2026-11-20)
+
+사용자가 완료된 rawclip30 self2의 fusion을2층에서4층으로 바꾸도록 요청했다.
+기존 `configs/trlt/3dtacdex_assembly/trlt_self_only.json`이 요청과 정확히 일치하며,
+실제 self2 run config snapshot과 대조해 `model.num_stages:2→4` 외 차이가 없음을
+확인했다. Tactile 입력·target clip(raw/30,-1,1),lambda_tactile1,modality-off,
+seed0,Stage A8000updates,batch64/micro64,Stage B defaults,online W&B10을 유지한다.
+기존 데이터/split/통계/7402-anchor visual cache를 재사용한다.
+
+새 run: `assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z`.
+실행 폴더:
+`experiments/trlt/3dtacdex_assembly/runs/assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z/`.
+Tmux socket `trlt-runs`, session `trlt-assembly-self4-rawclip30-seed0`.
+독립된 checkpoint/latent 경로를 사용하며 resume하지 않는다. 명시적9단계는 GPU
+1-update preflight+validation,Stage A,train/validation exports,Stage B,selection
+seal,test export/evaluation,기존 rawclip30 self2 및 RLT와의 비교 보고다.
+
+CPU CLI dry-run,실행 guard와 historical-only 보고 replay 근거:
+`experiments/trlt/3dtacdex_assembly/self4_rawclip30_validation/`.
+실제 GPU update/학습/평가 상태는 run의status.json,events.log,stage_logs와
+checkpoint를 확인한다. 과거 test 결과를 확인한 뒤의 seed0 탐색적 후속 비교다.
+Source/config/input 변경,점유된 GPU,실패 단계는 queue를 멈추며 자동 retry/resume하지 않는다.
+
+실제 queue 시작은2026-11-20 14:21:19KST (05:21:19UTC),GPU0이다.
+CPU CLI7개 dry-run,기존 지표 복사본으로 보고 코드 replay,실행 직전 source/config/
+input/GPU-idle guard가 통과했다. Active index는
+`experiments/trlt/3dtacdex_assembly/self4_rawclip_active_run.json`이며,
+첫 GPU preflight가 실제 모델 초기화를 시작한 것을 확인했다. 이 관측은 benchmark
+완료가 아니며 이후 상태는 실제events/checkpoint를 기준으로 판단한다.
+
+
+### Rawclip30 self4 완료 결과 (2026-11-20 확인)
+
+위 self4 run은 **2026-11-20 17:50:42KST (08:50:42UTC)**에 평가·보고까지
+**9/9단계 완료**했다. 실제 Stage A8000updates, validation-selected best7888;
+Stage B best epoch14,last24(patience10)이다. 새 checkpoint hash와 raw_clip30
+provenance를 확인했고,16원본 trajectory/248112valid target elements가 RLT·rawclip30
+self2와 동일함을 검증했다. 원본 trajectory별 값에서 주 MSE를 재집계해 일치했다.
+Seal 완료08:49:43UTC 이후08:49:44UTC에 test export를 시작했다.
+
+| 설정 | 주 Test normalized trajectory-macro action MSE ↓ | RLT 대비 |
+|---|---:|---:|
+| RLT | 0.059761459 | 기준 |
+| Rawclip30 self2 | 0.059127821 | −1.06% |
+| Rawclip30 self4 | 0.061742904 | +3.32% |
+
+Self4는 동일 rawclip30 self2보다 MSE가 **4.42% 높았다**.
+Paired 원본 trajectory-bootstrap95%구간(self4−self2)은
+**[-0.001400,+0.007499]**로0을 포함한다. RLT 대비 구간도
+**[-0.001875,+0.007694]**로0을 포함한다. 이번 seed의 관측상 self2가 가장 낮지만,
+4층의 일관된 악화나 세 설정의 확정적 우열을 주장하지 않는다. 두 실행은 실제
+config snapshot상 fusion depth2→4만 다르며, seed0 한 번의 test-inspected 후속
+실험이다. 과거 mean/std self4의0.092136257보다는32.99% 낮지만 전처리는 입력과
+loss의 수치적 스케일을 함께 바꾸므로 어느 하나의 효과로 특정하지 않는다.
+
+실제 근거:
+[최종 보고서](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z/final_report.md),
+[비교·bootstrap 집계](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z/summary.json),
+[검증 기록](../../experiments/trlt/3dtacdex_assembly/runs/assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z/results_review.json).
+이 결과 검토는 새 학습·추론·평가를 실행하지 않았다. 위 launch/preflight-only
+관측을 완료 상태로 대체하며, 완료 queue를 재시작하지 않는다.

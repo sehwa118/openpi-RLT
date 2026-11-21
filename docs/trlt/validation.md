@@ -294,3 +294,22 @@ checkpoint are recorded under
 `experiments/trlt/3dtacdex_assembly/clipping_default_validation/`.
 No new GPU work/training/evaluation was run. Completed benchmark result review:
 `experiments/trlt/3dtacdex_assembly/runs/assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z/results_review.json`.
+
+Assembly rawclip30 self4 depth follow-up (2026-11-20): actual saved self2 config
+and new config differ only in fusion num_stages2->4. Seven CPU CLI dry runs,
+historical-only report replay and source/config/input/GPU-idle guards passed.
+GPU0 preflight completed1actual update at batch64/micro64 and all3472validation
+queries; saved metadata confirms fusion4/raw_clip30. Main Stage A started fresh
+at2026-11-20T05:23:47Z. CPU evidence:
+`experiments/trlt/3dtacdex_assembly/self4_rawclip30_validation/`.
+Actual GPU evidence: `gpu_preflight_observation.json` inside run
+`assembly_self4_rawclip30_8k_fullb64_seed0_20261120T051945Z`. Later benchmark and
+final-evaluation completion require actual later logs/checkpoints; no new test
+features or baseline training were launched.
+
+Rawclip30 self4 completion verified2026-11-20: all9stages completed at08:50:42UTC;
+A8000updates,best7888; Bbest14,last24. Checkpoint parameter hashes, identical
+16test trajectory target counts(248112total), recomputed primary metric and
+selection-before-test timing passed. Evidence: rawclip30self4 run
+`results_review.json`. This result review performed no new training/inference/
+evaluation. See the Assembly experiment document for comparisons and limits.
