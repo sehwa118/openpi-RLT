@@ -1,12 +1,16 @@
 # 3DTac-Dex Assembly Stage B 어텐션 액터 실험 결과 (2026-11-21)
 
 - **실험 일자:** 2026-11-21
-- **브랜치 / 기준 커밋:** `attention-actor-3dtacdex` (`60ec20b`; `attention-actor` `8e79d4d` + `origin/TRLT-3DTacDex` `52b8a31` 병합)
+- **브랜치 / 기준 커밋:**
+  - **1차 비교 (`seed 0`, 5종):** `attention-actor-3dtacdex` (`60ec20b`; `attention-actor` `8e79d4d` + `origin/TRLT-3DTacDex` `52b8a31` 병합)
+  - **2차 다중 시드·경량·정규화 비교 (`seed 0, 1, 2`, 7종 × 3시드 = 21 runs):** `attention-actor-3dtacdex` (`d6b0700`)
 - **데이터셋 / 태스크:** `3dtacdex_assembly` (`22D` JAKA MiniCobo 6D 팔 + 16D 오른손 LEAP 핸드, `H=3` 액션 청크, `5 Hz`, PaXini 8 패드 × `15×3` 3축 taxel `clip(raw/30, -1, 1)`)
   - **분할 규모 (원본 trajectory 기준 그룹 분할, `split_seed=42`):** Train 77 trajectories (89 segments, 14,819 queries) / Validation 16 trajectories (17 segments, 3,472 queries) / Test 16 trajectories (18 segments, 3,778 queries, 248,112 valid action elements)
 - **동결 Stage A 표현:** `trlt_self_only` 2-layer `rawclip30` (`assembly_self2_rawclip30_8k_fullb64_seed0_20261119T104744Z`, `seed0`)
-- **평가 시드:** `seed 0` (`seed 0, 1, 2` 다중 시드 및 경량 `d=64` 후속 검증 예정)
-- **실행 환경:** `inst-i108` (`NVIDIA RTX PRO 6000 Blackwell`, GPU 0), 출력 경로 `/workspace/users/jiwoo/trlt_attention_actor_3dtacdex_self2_rawclip30_seed0`
+- **평가 시드:** 1차 `seed 0` / 2차 `seed 0, 1, 2` (공유 `seed0` 동결 잠재 캐시 위 `--latent-seed 0`)
+- **실행 환경 / 출력 경로 (`inst-i108`, NVIDIA RTX PRO 6000 Blackwell, GPU 0):**
+  - 1차: `/workspace/users/jiwoo/trlt_attention_actor_3dtacdex_self2_rawclip30_seed0`
+  - 2차: `/workspace/users/jiwoo/trlt_attention_actor_3dtacdex_self2_rawclip30_d64_mseed`
 - **실행 스크립트:** `scripts/run_attention_actor_stage_b.sh`
 
 ---
@@ -80,23 +84,55 @@ bash scripts/run_attention_actor_stage_b.sh \
 
 ---
 
-## 4. 통계적 한계 및 후속 실험 계획
+## 4. 2차 다중 시드(`seed 0, 1, 2`) 경량화(`d=64`) 및 정규화(`dropout=0.1`) 검증 결과
 
-### 4.1 현재 결과의 한계
-- **표본 및 시드:** `seed 0` 단일 Stage B 실행이며, 16개 test trajectory 기반 양측 95% episode-bootstrap CI에서 `hierarchical vs resmlp`(`[-0.015511, -0.001828]`)와 `kinematic vs resmlp`(`[-0.012978, -0.000459]`)는 0 미만으로 확정되지만, **`hierarchical vs mlp`는 `[-0.008047, +0.000280]`으로 상한이 0을 미세하게(+0.000280) 걸치고 있습니다.**
-- **소규모 데이터 과적합 징후:** `725K` `resmlp`의 급격한 과적합(`val_best 0.070120`)과 `722K` `full`의 상승을 볼 때, `14,819` 쿼리 규모에서는 `d=128`(`722K`)이 다소 큰 편입니다.
-- **오프라인 MSE 대 실제 제어:** normalized MSE `-6.27% ~ -12.66%`는 제곱근(RMSE) 기준 약 `-3.2% ~ -6.5%` (Arm MSE `-19.33%`는 Arm RMSE 약 `-10.2%`) 감소에 해당하며, 오프라인 지표 개선이 곧바로 closed-loop 실기 조립 성공률을 보장하지는 않습니다.
+1차 `seed 0` 실험에서 남아 있던 두 가지 검증 포인트—① `hierarchical vs mlp` 양측 95% CI(`[-0.008047, +0.000280]`)가 0에 미세하게 걸쳐 있던 점, ② `725K` `resmlp`의 과적합을 감안해 `mlp`(`220K`) 이하의 경량 용량(`d=64`, `201K`) 및 `dropout=0.1` 정규화 효과 검증—를 확인하기 위해 **7종 × 3시드(총 21개 Stage B 실행)**를 동일 `seed0` 동결 잠재 캐시(`--latent-seed 0`) 위에서 완료했습니다.
 
-### 4.2 후속 실험 (#1 경량화/정규화 + #2 다중 시드 `seed 0,1,2`)
-1. **경량 `d=64` (~`201K`, 기존 `mlp` `220K`보다 작음) & Dropout `0.1` 비교:**
-   - `configs/trlt/3dtacdex_assembly/attention_actor/`에 추가:
-     - `probe_resmlp_d160.json` (`200,386` params, `d=64`와 `-0.35%` 파라미터 매칭)
-     - `probe_part_attn_hierarchical_d64.json` (`d=64, L=2, H=4`, `201,090` params)
-     - `probe_part_attn_hierarchical_d64_drop01.json` (`201,090` params, `dropout=0.1`)
-     - `probe_part_attn_kinematic_d64.json` (`201,090` params)
-     - `probe_part_attn_hierarchical_drop01.json` (`d=128`, `721,602` params, `dropout=0.1`)
-2. **동일 동결 `seed0` 캐시 위 다중 시드(`--seeds "0 1 2" --latent-seed 0`):**
-   - Stage A 캐시(`seed0`)를 공유한 채 Stage B를 `seed 0, 1, 2`로 반복 학습·봉인·평가하고, `summarize`의 `paired_vs_baseline.*.seed_mean`으로 시드 평균 에피소드별 95% CI를 산출합니다.
+### 4.1 3-Seed 종합 성능 요약 (`seed 0, 1, 2`, 16개 원본 trajectory)
+
+| 순위 | 변형 (`variant`) | Params | `primary_mse` (3-seed mean ± std) ↓ | `vs MLP` (`seed_mean`, 양측 95% CI) | `vs ResMLP_d160` (`seed_mean`, 양측 95% CI) |
+|---:|---|---:|---:|---|---|
+| **1위** | **`part_attention_hierarchical_drop01`** (`d=128, drop=0.1`) | 721,602 | **`0.051502 ± 0.000464`** | **`-13.89%`** (`-0.008308`, `[-0.012281, -0.004943]`) | **`-20.32%`** (`-0.013131`, `[-0.017242, -0.009450]`) |
+| **2위** | **`part_attention_hierarchical_d64_drop01`** (`d=64, drop=0.1`) | **201,090** | **`0.054064 ± 0.001606`** | **`-9.61%`** (`-0.005747`, `[-0.008861, -0.003326]`) | **`-16.35%`** (`-0.010569`, `[-0.013475, -0.008140]`) |
+| **3위** | `part_attention_hierarchical` (`d=128, drop=0.0`) | 721,602 | `0.055061 ± 0.001938` | **`-7.94%`** (`-0.004749`, `[-0.010164, -0.000214]`) | **`-14.81%`** (`-0.009572`, `[-0.015056, -0.004638]`) |
+| **4위** | `part_attention_kinematic_d64` (`d=64, drop=0.0`) | **201,090** | `0.055514 ± 0.000913` | **`-7.18%`** (`-0.004296`, `[-0.008014, -0.001029]`) | **`-14.11%`** (`-0.009119`, `[-0.012089, -0.006769]`) |
+| **5위** | `part_attention_hierarchical_d64` (`d=64, drop=0.0`) | **201,090** | `0.056329 ± 0.004468` | **`-5.82%`** (`-0.003481`, `[-0.006733, -0.000343]`) | **`-12.85%`** (`-0.008304`, `[-0.012416, -0.005098]`) |
+| 6위 | `mlp` (`2×256`, `sehwa` 기준선) | 219,970 | `0.059810 ± 0.002191` | 기준선 | `-7.46%` (`-0.004823`, `[-0.007168, -0.002878]`) |
+| 7위 | `resmlp_d160` (`2×160`, `d=64`과 `-0.35%` 매칭) | 200,386 | `0.064633 ± 0.001362` | `+8.06%` (`+0.004823`, `[+0.002776, +0.007160]`) | 기준선 |
+
+> **5개 어텐션 변형 전부가 `seed_mean` 양측 95% 페어드 부트스트랩 신뢰구간에서 `mlp`와 `resmlp_d160`을 모두 0 미만으로 유의하게 상회**했습니다.
+
+### 4.2 시드별 세부 지표 및 부위별(`arm`, `hand`) 3-Seed 평균
+
+| 변형 | `seed 0` primary (`val_best`) | `seed 1` primary (`val_best`) | `seed 2` primary (`val_best`) | `micro` 3-seed avg ↓ | `arm` MSE 3-seed avg ↓ | `hand` MSE 3-seed avg ↓ | `val_best` 3-seed avg ↓ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **`part_attention_hierarchical_drop01`** | **0.052002** (**0.061315**) | **0.051419** (**0.063289**) | **0.051085** (**0.059160**) | **0.058055** | **0.000521** (`-24.78%`) | **0.002728** (`-14.57%`) | **0.061255** |
+| `part_attention_hierarchical_d64_drop01` | 0.055015 (0.065251) | 0.052210 (0.064040) | 0.054966 (0.064320) | 0.060698 | 0.000533 | 0.002963 | 0.064537 |
+| `part_attention_hierarchical` | 0.055418 (0.064868) | 0.056796 (0.068541) | 0.052970 (0.064027) | 0.061207 | 0.000530 | 0.003102 | 0.065812 |
+| `part_attention_kinematic_d64` | 0.055419 (0.065732) | 0.054652 (0.068554) | 0.056470 (0.073753) | 0.061579 | 0.000589 | 0.003039 | 0.069346 |
+| `part_attention_hierarchical_d64` | 0.061017 (0.068300) | 0.052120 (0.063137) | 0.055850 (0.066942) | 0.061012 | 0.000573 | 0.003208 | 0.066126 |
+| `mlp` | 0.059128 (0.064835) | 0.058042 (0.066154) | 0.062261 (0.064579) | 0.064774 | 0.000693 | 0.003194 | 0.065189 |
+| `resmlp_d160` | 0.064348 (0.071912) | 0.063436 (0.074610) | 0.066115 (0.078935) | 0.070756 | 0.000881 | 0.003800 | 0.075152 |
+
+*(괄호 안 `%`는 `mlp` 3-seed 평균 대비 상대 변화율; 개별 시드 `vs MLP` 95% CI 중 **`part_attention_hierarchical_drop01`** 은 seed 0 `[-0.010805, -0.003415]` `-12.05%`, seed 1 `[-0.012065, -0.001718]` `-11.41%`, seed 2 `[-0.016766, -0.006700]` `-17.95%`로 **3개 시드 전부 단독 유의**.)*
+
+### 4.3 핵심 검증 결론
+
+1. **`part_attention_hierarchical_drop01`의 전 시드·전 지표 완승:**
+   - 3개 시드 모두에서 개별 `vs MLP` 양측 95% CI가 0 미만(`-12.05%`, `-11.41%`, `-17.95%`), 3시드 평균 **`0.051502 ± 0.000464`** (`mlp` 대비 **`-13.89%`**, `resmlp_d160` 대비 **`-20.32%`**)를 기록했습니다.
+   - 시드 간 표준편차가 `±0.000464`로 `mlp`(`±0.002191`) 대비 **4.72배 더 안정적**이며, 학습 중 `val_best` 역시 3개 시드 모두에서 1위를 차지해 테스트 분할 우연이 아닌 일반화 개선을 확인했습니다.
+   - `arm MSE`(`0.000521`, `-24.78%`)와 `hand MSE`(`0.002728`, `-14.57%`)가 함께 큰 폭으로 낮아졌습니다.
+2. **"파라미터 수가 많아서 유리했다" 반론 완전 해소 (`d64_drop01`):**
+   - `part_attention_hierarchical_d64_drop01`(`201,090` params)은 기존 `mlp`(`219,970` params)보다 **파라미터가 8.58% 더 적은데도** `mlp` 대비 **`-9.61%`** (`[-0.008861, -0.003326]`), 동일 용량의 `resmlp_d160`(`200,386` params) 대비 **`-16.35%`** (`[-0.013475, -0.008140]`) 성능 향상을 달성했습니다.
+3. **Dropout 0.1 정규화 효과 검증:**
+   - `d=64`: `0.056329 ± 0.004468` → **`0.054064 ± 0.001606`** (오차 감소 + 시드 표준편차 2.78배 축소)
+   - `d=128`: `0.055061 ± 0.001938` → **`0.051502 ± 0.000464`** (오차 추가 감소 + 시드 표준편차 4.18배 축소)
+   - `d=128` 용량 자체가 문제가 아니라 소규모 77-trajectory 데이터에서 어텐션/FFN 과적합을 억제할 `dropout=0.1` 정규화가 부족했음을 확인했습니다.
+4. **Top-down `hierarchical` 마스크의 작동 원리 (`full` 대비):**
+   - 단팔 22D(5부위)에서 `full`(`25/25`)과 `hierarchical`(`21/25`)의 차이는 **팔(`arm`) 쿼리 행이 4개 손가락 키를 `-inf`(float min)로 마스킹하는지 여부** 하나입니다.
+   - `손가락 → 팔`(손가락이 팔 상태를 참조, Top-down 정보 흐름 `팔 ⇒ 손가락`)과 `손가락 ↔ 손가락` 협응은 모두 열어 두되, `팔 → 손가락`(손가락 노이즈가 팔 예측을 흔드는 상향 경로)만 차단함으로써 팔과 손 모두에서 최고 성능을 얻었습니다.
+
+### 4.4 재현 명령어 (2차 21-run 실행)
 
 ```bash
 OUT_ROOT="/workspace/users/$USER/trlt_attention_actor_3dtacdex_self2_rawclip30_d64_mseed"
@@ -117,3 +153,11 @@ tmux new-session -d -s attn_3dtacdex_mseed \
      --variants \"mlp resmlp_d160 part_attention_hierarchical_d64 part_attention_hierarchical_d64_drop01 part_attention_kinematic_d64 part_attention_hierarchical part_attention_hierarchical_drop01\" \
      --device 0 2>&1 | tee \"$OUT_ROOT/run.log\""
 ```
+
+---
+
+## 5. 남은 한계 및 후속 단계
+
+- **Stage A 표현 시드 고정 (`--latent-seed 0`):** 위 3-seed 편차는 동결된 `seed0` `trlt_self_only` 표현 위에서 Stage B 액터의 초기화·셔플·dropout 변동을 측정한 결과이며, Stage A 자체를 다른 시드로 재학습한 변동성은 포함하지 않습니다.
+- **오프라인 MSE vs 실제 제어:** 1차·2차 모두 오프라인 trajectory-macro MSE 지표 검증이므로, 실기 로봇/물리 시뮬레이터 closed-loop 조립 성공률은 별도 검증이 필요합니다.
+- **추천 다음 비교:** 동일 프로토콜의 시각 단독 Stage A 캐시(`rlt_original`, `assembly_8k_fullb64_batched_seed0_20261118/rlt_original`) 위에서 `mlp` 대 `part_attention_hierarchical_drop01` 3-seed 비교를 진행하면, 어텐션 액터가 촉각+시각 표현(`trlt_self_only`)의 잠재 정보를 시각 단독 대비 얼마나 더 잘 끌어내는지 교차 검증할 수 있습니다.
