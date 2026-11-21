@@ -99,6 +99,11 @@ def test_policy_metadata_matches_runner_manifest():
     assert isinstance(manifest["norm_stats_id"], str)
 
 
+def test_manifest_cameras_follow_dataset_cameras():
+    config = _config.get_config("pi05_omy_leap")
+    assert config.policy_metadata["manifest"]["cameras"] == list(config.data.cameras)
+
+
 def _fake_norm_stats() -> dict[str, _normalize.NormStats]:
     def stats(dim):
         return _normalize.NormStats(mean=np.zeros(dim), std=np.ones(dim), q01=-np.full(dim, 2.0), q99=np.full(dim, 2.0))

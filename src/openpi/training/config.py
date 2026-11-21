@@ -44,6 +44,8 @@ AGILEX_PI05_BASE_CKPT = os.environ.get("AGILEX_PI05_BASE_CKPT", "gs://openpi-ass
 # OMY arm + LEAP hand rig (SHAPE_UP_Tactile tactile_rec -> LeRobot v2.1).
 OMY_LEAP_LEROBOT_REPO = os.environ.get("OMY_LEAP_LEROBOT_REPO", "local/omy_leap_sync_test")
 OMY_LEAP_PI05_BASE_CKPT = os.environ.get("OMY_LEAP_PI05_BASE_CKPT", "gs://openpi-assets/checkpoints/pi05_base/params")
+# Rig cameras used by the policy. Feeds both the dataset repack and the served manifest.
+OMY_LEAP_CAMERAS = ("cam_wrist",)
 # Manifest values the policy runner must match. Update them whenever the served checkpoint or
 # its norm stats change.
 OMY_LEAP_CHECKPOINT_ID = os.environ.get("OMY_LEAP_CHECKPOINT_ID", "pi05_base-untrained")
@@ -1132,12 +1134,13 @@ _CONFIGS = [
         ),
         data=LerobotOmyLeapDataConfig(
             repo_id=OMY_LEAP_LEROBOT_REPO,
+            cameras=OMY_LEAP_CAMERAS,
             base_config=DataConfig(prompt_from_task=True),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(OMY_LEAP_PI05_BASE_CKPT),
         policy_metadata={
             "manifest": omy_leap_policy.make_manifest(
-                cameras=["cam_wrist"],
+                cameras=list(OMY_LEAP_CAMERAS),
                 checkpoint=OMY_LEAP_CHECKPOINT_ID,
                 norm_stats_id=OMY_LEAP_NORM_STATS_ID,
                 pred_horizon=50,
