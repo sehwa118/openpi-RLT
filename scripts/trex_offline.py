@@ -24,6 +24,9 @@ def parser():
         command.add_argument("--device", default="0", help="Physical GPU index for CUDA_VISIBLE_DEVICES")
         command.add_argument("--dry-run", action="store_true")
         command.add_argument("--output-dir")
+        command.add_argument(
+            "--selection-seal", help="Assembly: seal of all validation-selected checkpoints before test access"
+        )
         if name in ("train-representation", "train-probe", "smoke"):
             command.add_argument(
                 "--max-steps", type=int, help="Total optimizer-step limit; overrides representation.max_steps"
@@ -38,13 +41,15 @@ def parser():
                 "--num-workers", type=int, default=2, help="CPU DataLoader workers; 0 for synchronous loading"
             )
             command.add_argument("--prefetch-factor", type=int, default=2, help="Batches queued per CPU worker")
-            command.add_argument("--wandb", choices=("disabled", "online", "offline"), default="disabled")
+            command.add_argument("--wandb", choices=("disabled", "online", "offline"))
             command.add_argument("--wandb-project")
             command.add_argument("--wandb-entity")
             command.add_argument("--wandb-name")
             command.add_argument("--wandb-group")
+            command.add_argument("--wandb-log-every", type=int, help="Log W&B train metrics every N optimizer updates")
         if name in ("train-representation", "export-latents"):
-            command.add_argument("--data-root", default="datasets/trex_squeeze")
+            command.add_argument("--data-root")
+            command.add_argument("--protocol-dir", help="Assembly grouped protocol directory")
             command.add_argument("--split-manifest")
             command.add_argument("--normalization")
             command.add_argument("--visual-cache")
@@ -58,6 +63,7 @@ def parser():
             command.add_argument("--train-latents", required=True)
             command.add_argument("--validation-latents", required=True)
         if name == "evaluate":
+            command.add_argument("--protocol-dir", help="Assembly grouped protocol directory")
             command.add_argument("--latents", required=True)
             command.add_argument("--probe-checkpoint", required=True)
             command.add_argument("--normalization", required=True)
@@ -99,16 +105,56 @@ def main(argv=None):
     probe = ProbeConfig(**raw.get("probe", {}))
     if config.history_frames != temporal.tactile_history_frames or probe.horizon != temporal.action_horizon_frames:
         raise ValueError("Model/probe and temporal configuration disagree")
-    if config.state_dim != 58 or probe.action_dim != 58:
-        raise ValueError("T-Rex probe preserves all 58 state/action dimensions")
-    if args.command == "smoke" and not config.use_sensor_id_embedding:
-        raise ValueError("Sensor ID ablation requires its explicit config and training/export stages")
-    if args.command == "smoke" and config.geometry_mode != "none":
-        raise ValueError(
-            "Geometry smoke uses scripts/verify_trlt_geometry.py (CPU); use explicit training stages for GPU runs"
-        )
-    if args.command != "smoke" and (config.num_sensors != 10 or config.tactile_channels != 1):
-        raise ValueError("T-Rex requires ten grayscale deformation sensors")
+    dataset_kind = raw.get("dataset_kind", "trex_squeeze")
+    if dataset_kind not in ("trex_squeeze", "3dtacdex_assembly"):
+        raise ValueError("Unknown dataset_kind")
+    assembly = dataset_kind == "3dtacdex_assembly"
+    tactile_preprocessing = raw.get("tactile_preprocessing")
+    if assembly:
+        from openpi.trlt.tacdex_data import tactile_preprocessing_config
+
+        tactile_preprocessing = tactile_preprocessing_config(tactile_preprocessing)
+    elif tactile_preprocessing is not None:
+        raise ValueError("tactile_preprocessing override is Assembly-only")
+    if assembly:
+        if (
+            config.state_dim != 22
+            or probe.action_dim != 22
+            or config.num_cameras != 2
+            or config.num_sensors != 8
+            or config.tactile_format != "taxels"
+            or config.num_taxels != 15
+            or config.tactile_channels != 3
+            or config.geometry_mode != "none"
+            or temporal.fps != 5
+        ):
+            raise ValueError("Assembly requires 22D state/action, two RGB cameras and eight native 15x3 taxel pads")
+        if args.command == "smoke":
+            raise ValueError("Use the CPU Assembly regression tests; no implicit synthetic GPU run")
+        if getattr(args, "split_manifest", None) or (
+            args.command in ("train-representation", "export-latents") and args.normalization
+        ):
+            raise ValueError("Assembly reads sealed split/normalization from --protocol-dir")
+    else:
+        if config.state_dim != 58 or probe.action_dim != 58:
+            raise ValueError("T-Rex probe preserves all 58 state/action dimensions")
+        if args.command == "smoke" and (not config.use_sensor_id_embedding or config.geometry_mode != "none"):
+            raise ValueError("Use explicit ablation configs and training/export stages")
+        if args.command != "smoke" and (
+            config.num_sensors != 10 or config.tactile_channels != 1 or config.tactile_format != "image"
+        ):
+            raise ValueError("T-Rex requires ten grayscale deformation sensors")
+    from openpi.trlt.tracking import tracking_options
+
+    configured_tracking = raw.get("tracking", {})
+    tracking = {
+        key: getattr(args, "wandb_" + key, None) or configured_tracking.get(key)
+        for key in ("project", "entity", "name", "group")
+    }
+    tracking["mode"] = getattr(args, "wandb", None) or configured_tracking.get("mode", "disabled")
+    interval = getattr(args, "wandb_log_every", None)
+    tracking["log_every_steps"] = configured_tracking.get("log_every_steps", 1) if interval is None else interval
+    tracking = tracking_options(tracking)
     if args.dry_run:
         print(
             json.dumps(
@@ -118,6 +164,8 @@ def main(argv=None):
                     "temporal": asdict(temporal),
                     "representation": asdict(representation),
                     "probe": asdict(probe),
+                    "tracking": tracking,
+                    "tactile_preprocessing": tactile_preprocessing,
                     "arguments": vars(args),
                     "status": "plan-only; no model initialization or training",
                 },
@@ -126,6 +174,15 @@ def main(argv=None):
             )
         )
         return
+    if assembly and ((args.command == "export-latents" and args.split == "test") or args.command == "evaluate"):
+        from openpi.trlt.tacdex_experiment import validate_selection_seal
+
+        validate_selection_seal(
+            args.selection_seal,
+            protocol_dir=getattr(args, "protocol_dir", None) or raw.get("protocol_dir"),
+            checkpoint=args.representation_checkpoint if args.command == "export-latents" else args.probe_checkpoint,
+            allow_probe_seal=(args.command == "evaluate"),
+        )
     if not args.device or args.device == "cpu" or "," in args.device:
         raise ValueError("Select one explicitly allocated GPU index with --device")
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device
@@ -141,11 +198,11 @@ def main(argv=None):
     from openpi.trlt.runner import train_representation
 
     assert_gpu()
-    tracking = {key: getattr(args, "wandb_" + key, None) for key in ("project", "entity", "name", "group")}
-    tracking["mode"] = getattr(args, "wandb", "disabled")
     variant = config.mode if config.geometry_mode == "none" else f"geometry_{config.geometry_mode}/{config.mode}"
     if not config.use_sensor_id_embedding:
         variant = "no_sensor_id/" + variant
+    if assembly:
+        variant = "3dtacdex_assembly/" + variant
     base = f"checkpoints/trlt/{variant}/seed{args.seed}"
     logs = f"experiments/trlt/{variant}/seed{args.seed}"
     if args.command == "smoke":
@@ -159,12 +216,27 @@ def main(argv=None):
         from openpi.trlt.cache import FeatureCache
         from openpi.trlt.data import TrexDataset
 
-        data_root = root_path(args.data_root)
+        data_root = root_path(args.data_root or raw.get("data_root", "datasets/trex_squeeze"))
         split_path = root_path(args.split_manifest) if args.split_manifest else data_root / "splits.json"
         norm_path = root_path(args.normalization) if args.normalization else data_root / "normalization.json"
-        cache = FeatureCache(root_path(args.visual_cache) if args.visual_cache else data_root / "visual_cache")
+        cache = FeatureCache(
+            root_path(args.visual_cache or raw.get("visual_cache"))
+            if args.visual_cache or raw.get("visual_cache")
+            else data_root / "visual_cache"
+        )
 
         def dataset(split):
+            if assembly:
+                from openpi.trlt.tacdex_data import AssemblyDataset
+
+                return AssemblyDataset(
+                    data_root,
+                    args.protocol_dir or raw.get("protocol_dir", "datasets/3dtacdex_assembly/protocol"),
+                    split=split,
+                    temporal=temporal,
+                    visual_cache=cache,
+                    tactile_preprocessing=tactile_preprocessing,
+                )
             return TrexDataset(
                 data_root,
                 split_path,
@@ -196,7 +268,7 @@ def main(argv=None):
             result = export_frozen_latents(
                 dataset(args.split),
                 args.representation_checkpoint,
-                args.output_dir or f"datasets/trex_squeeze/latents/{variant}/seed{args.seed}/{args.split}",
+                args.output_dir or f"datasets/{dataset_kind}/latents/{variant}/seed{args.seed}/{args.split}",
                 batch_size=args.batch_size,
                 max_samples=args.max_samples,
                 force_cache_rebuild=args.force_cache_rebuild,

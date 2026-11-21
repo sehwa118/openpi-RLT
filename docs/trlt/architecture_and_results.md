@@ -266,3 +266,13 @@ untouched holdout 결과도 아니다. 각 실행의 checkpoint는 여전히 val
   [3D RoPE와 적용 쌍](../../src/openpi/models/trlt_geometry.py),
   [FK와 geometry cache](../../src/openpi/trlt/geometry.py).
   상세 계약과 CLI는 [README.md](README.md), [geometry.md](geometry.md)를 참조한다.
+
+
+## 7. 별도 Assembly 실험 결과
+
+위 T-Rex 비교와 별개로, Assembly의 tactile 전처리·self2 후속 결과는
+[Assembly 통합 결과표](3dtacdex_experiments.md#rawclip30-완료-결과-및-tactile-전처리-기본-정책-2026-11-20-확인)에 정리했다.
+Rawclip30 self2의 주 MSE는0.059127821로 mean/std self2의0.081193840보다27.18%
+낮고 RLT0.059761459와는 비슷하다(RLT 대비paired95%구간에0포함). Seed0만의
+탐색적 결과다. 현재 Assembly tactile 입력·target은clip(raw/30,-1,1)만 사용하고
+state/action mean/std는 유지한다. T-Rex 전처리와 과거 결과는 그대로다.

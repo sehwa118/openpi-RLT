@@ -139,14 +139,17 @@ def feature_metadata(
     tokenizer_hash,
     feature_dtype="float32",
     temporal=None,
+    camera_order=None,
+    camera_keys=CAMERA_KEYS,
 ):
     temporal = temporal or TemporalConfig()
+    camera_order = CAMERAS if camera_order is None else tuple(camera_order)
     return {
         "revision": revision,
         "episode_manifest_hash": episode_manifest_hash,
         "backbone": checkpoint_identity(backbone_checkpoint),
-        "camera_order": CAMERAS,
-        "camera_mapping": dict(zip(CAMERAS, CAMERA_KEYS, strict=True)),
+        "camera_order": camera_order,
+        "camera_mapping": dict(zip(camera_order, camera_keys, strict=True)),
         "preprocessing": {
             "resize": "openpi.resize_with_pad",
             "resolution": [224, 224],

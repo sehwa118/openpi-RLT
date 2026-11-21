@@ -29,18 +29,22 @@ class ActionMetrics:
     primary averages these episode MSEs equally. Micro weights every valid element.
     """
 
-    def __init__(self, action_mean, action_std):
+    def __init__(self, action_mean, action_std, *, groups=None):
         self.mean = np.asarray(action_mean, dtype=np.float64)
         self.std = np.asarray(action_std, dtype=np.float64)
-        if self.mean.shape != (58,) or self.std.shape != (58,) or np.any(self.std <= 0):
-            raise ValueError("Expected separate finite 58-dimensional action mean/std")
+        if self.mean.ndim != 1 or not self.mean.size or self.std.shape != self.mean.shape or np.any(self.std <= 0):
+            raise ValueError("Expected matching finite action mean/std vectors")
         if not np.all(np.isfinite(self.mean)) or not np.all(np.isfinite(self.std)):
             raise ValueError("Non-finite normalization")
+        self.dimension = len(self.mean)
+        self.groups = (GROUPS if self.dimension == 58 else {}) if groups is None else groups
+        if any(not indices or min(indices) < 0 or max(indices) >= self.dimension for indices in self.groups.values()):
+            raise ValueError("Invalid action group indices")
         self.episodes = {}
-        self.joint_sum = np.zeros(58, np.float64)
+        self.joint_sum = np.zeros(self.dimension, np.float64)
         self.offset_sum = None
         self.offset_count = None
-        self.joint_count = 0
+        self.joint_count = np.zeros(self.dimension, np.int64)
         self.normalized_sum = 0.0
         self.raw_sum = 0.0
         self.count = 0
@@ -48,13 +52,15 @@ class ActionMetrics:
     def update(self, predicted, target, valid_mask, episode_ids, objects):
         predicted, target = np.asarray(predicted, np.float64), np.asarray(target, np.float64)
         valid = np.asarray(valid_mask, bool)
-        if predicted.shape != target.shape or predicted.ndim != 3 or predicted.shape[-1] != 58:
-            raise ValueError("Action tensors must have identical [B,Ha,58] shapes")
-        if valid.shape != predicted.shape[:2]:
-            raise ValueError("Horizon mask shape mismatch")
+        if predicted.shape != target.shape or predicted.ndim != 3 or predicted.shape[-1] != self.dimension:
+            raise ValueError("Action tensors must have identical [B,Ha,D] shapes")
+        if valid.shape == predicted.shape[:2]:
+            valid = np.broadcast_to(valid[..., None], predicted.shape)
+        if valid.shape != predicted.shape:
+            raise ValueError("Action element/horizon mask shape mismatch")
         if np.any(~np.isfinite(predicted[valid])) or np.any(~np.isfinite(target[valid])):
             raise ValueError("Non-finite valid action prediction/target")
-        error = np.where(valid[..., None], predicted - target, 0.0)
+        error = np.where(valid, predicted - target, 0.0)
         squared = error**2
         raw_squared = squared * self.std**2
         if self.offset_sum is None:
@@ -63,12 +69,12 @@ class ActionMetrics:
         if len(self.offset_sum) != predicted.shape[1]:
             raise ValueError("Cannot mix action horizons")
         self.joint_sum += raw_squared.sum(axis=(0, 1))
-        self.joint_count += int(valid.sum())
+        self.joint_count += valid.sum(axis=(0, 1))
         self.offset_sum += raw_squared.sum(axis=(0, 2))
-        self.offset_count += valid.sum(axis=0) * 58
+        self.offset_count += valid.sum(axis=(0, 2))
         self.normalized_sum += float(squared.sum())
         self.raw_sum += float(raw_squared.sum())
-        self.count += int(valid.sum()) * 58
+        self.count += int(valid.sum())
         for i, ep in enumerate(episode_ids):
             key = str(int(ep))
             obj = str(objects[i])
@@ -77,7 +83,7 @@ class ActionMetrics:
                 raise ValueError(f"Episode {key} has conflicting object labels")
             row["normalized_sum"] += float(squared[i].sum())
             row["raw_sum"] += float(raw_squared[i].sum())
-            row["count"] += int(valid[i].sum()) * 58
+            row["count"] += int(valid[i].sum())
 
     def result(self):
         episodes = {
@@ -120,16 +126,16 @@ class ActionMetrics:
             "normalized_object_macro_mse": float(np.mean(obj_values)) if obj_values else None,
             "object_macro_mse": float(np.mean(obj_raw)) if obj_raw else None,
             "group_mse": {
-                name: _ratio(self.joint_sum[indices].sum(), self.joint_count * len(indices))
-                for name, indices in GROUPS.items()
+                name: _ratio(self.joint_sum[indices].sum(), self.joint_count[indices].sum())
+                for name, indices in self.groups.items()
             },
-            "joint_mse": [_ratio(value, self.joint_count) for value in self.joint_sum],
+            "joint_mse": [_ratio(value, count) for value, count in zip(self.joint_sum, self.joint_count, strict=True)],
             "horizon_mse": offsets,
             "first_action_mse": offsets[0] if offsets else None,
             "episodes": episodes,
             "objects": objects,
             "valid_elements": self.count,
-            "aggregation": "Episode macro averages each episode's valid query*horizon*58 MSE equally; micro includes overlapping query/offset labels.",
+            "aggregation": "Episode macro averages each episode's valid query*horizon*joint MSE equally; micro includes overlapping query/offset labels.",
         }
 
 

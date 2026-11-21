@@ -17,6 +17,8 @@ from openpi.models.trlt_actor import build_action_probe
 from openpi.models.trlt_actor import part_attention_mask
 from openpi.models.trlt_actor import part_specs_for_dim
 from openpi.trlt.config import ProbeConfig
+from openpi.trlt.config import TemporalConfig
+from openpi.trlt.config import digest
 from openpi.trlt.config import probe_config_dict
 from openpi.trlt.config import probe_variant_name
 from openpi.trlt.config import root_path
@@ -514,3 +516,133 @@ def test_dropout_train_mode_and_single_sample_batch(architecture, mask_mode):
     assert all(bool(jnp.all(jnp.isfinite(leaf))) for leaf in jax.tree_util.tree_leaves(grad_params))
     max_param_grad = max(float(jnp.max(jnp.abs(leaf))) for leaf in jax.tree_util.tree_leaves(grad_params))
     assert max_param_grad > 0.0
+
+
+def test_assembly_22d_parameter_parity_and_dry_run_configs(capsys):
+    script_path = root_path("scripts/trex_offline.py")
+    spec = importlib.util.spec_from_file_location("trex_offline", script_path)
+    trex_offline = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(trex_offline)
+
+    z = jnp.zeros((2, 1, 512), dtype=jnp.float32)
+    prop = jnp.zeros((2, 22), dtype=jnp.float32)
+    age = jnp.zeros((2,), dtype=jnp.float32)
+
+    expected = {
+        "probe_mlp.json": ("mlp", "full", 219_970),
+        "probe_resmlp.json": ("resmlp", "full", 724_882),
+        "probe_part_attn_full.json": ("part_attention", "full", 721_602),
+        "probe_part_attn_kinematic.json": ("part_attention", "kinematic", 721_602),
+        "probe_part_attn_hierarchical.json": ("part_attention", "hierarchical", 721_602),
+    }
+    counts = {}
+    for filename, (arch, mask_mode, expected_count) in expected.items():
+        cfg_path = root_path(f"configs/trlt/3dtacdex_assembly/attention_actor/{filename}")
+        raw = json.loads(cfg_path.read_text())
+        assert raw["tracking"]["mode"] == "disabled"
+        assert raw["dataset_kind"] == "3dtacdex_assembly"
+        cfg = ProbeConfig(**raw["probe"])
+        params = build_action_probe(cfg).init(jax.random.PRNGKey(0), z, prop, age, train=False)["params"]
+        counts[filename] = _param_count(params)
+        assert counts[filename] == expected_count
+
+        trex_offline.main(
+            [
+                "train-probe",
+                "--config",
+                str(cfg_path),
+                "--train-latents",
+                "/tmp/t",
+                "--validation-latents",
+                "/tmp/v",
+                "--dry-run",
+            ]
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["probe"]["architecture"] == arch
+        assert payload["probe"]["attention_mask_mode"] == mask_mode
+        assert payload["probe"]["action_dim"] == 22
+        assert payload["probe"]["horizon"] == 3
+        assert payload["tracking"]["mode"] == "disabled"
+
+    rel_diff = (
+        abs(counts["probe_resmlp.json"] - counts["probe_part_attn_full.json"]) / counts["probe_part_attn_full.json"]
+    )
+    assert rel_diff < 0.005
+
+
+def test_assembly_elementwise_mask_and_action_groups(tmp_path):
+    class AssemblyLatentFixture(FrozenLatentFixture):
+        def __init__(self, split: str, *, size: int = 4):
+            super().__init__(split, size=size, latent_dim=16)
+            norm = {
+                "state": {"mean": [0.0] * 22, "std": [1.0] * 22},
+                "action": {"mean": [0.0] * 22, "std": [1.0] * 22},
+                "action_groups": {"arm": list(range(6)), "hand": list(range(6, 22))},
+                "split_hash": "assembly-split-h",
+            }
+            norm["hash"] = digest(norm)
+            self.normalization = norm
+            self.provenance.update(
+                {
+                    "dataset_kind": "3dtacdex_assembly",
+                    "model": "trlt_self_only",
+                    "normalization_hash": norm["hash"],
+                    "temporal": {**vars(TemporalConfig()), "fps": 5.0, "action_horizon_frames": 3},
+                }
+            )
+
+        def __getitem__(self, index: int):
+            sample = super().__getitem__(index)
+            rng = np.random.default_rng(2000 + index)
+            sample["proprioception"] = rng.normal(0.0, 0.5, size=(22,)).astype(np.float32)
+            target = rng.normal(0.0, 0.5, size=(3, 22)).astype(np.float32)
+            mask = np.ones((3, 22), dtype=bool)
+            if index % 2 == 1:
+                mask[:, 6:] = False
+                target[:, 6:] = 0.0
+            sample["action_target"] = target
+            sample["action_valid_mask"] = mask
+            return sample
+
+    train_ds = AssemblyLatentFixture("train", size=4)
+    val_ds = AssemblyLatentFixture("validation", size=2)
+    test_ds = AssemblyLatentFixture("test", size=2)
+    cfg = ProbeConfig(
+        architecture="part_attention",
+        attention_mask_mode="hierarchical",
+        hidden_dim=16,
+        depth=2,
+        num_heads=4,
+        action_dim=22,
+        horizon=3,
+        batch_size=2,
+        max_epochs=2,
+        patience=5,
+        learning_rate=5e-4,
+        lr_schedule="cosine",
+        warmup_steps=1,
+    )
+    trained = train_action_probe(
+        train_ds,
+        val_ds,
+        cfg,
+        tmp_path / "ckpt",
+        seed=0,
+        max_steps=2,
+        log_dir=tmp_path / "logs",
+        num_workers=0,
+        progress=False,
+    )
+    report = evaluate_action_probe(
+        test_ds,
+        trained["best_checkpoint"],
+        train_ds.normalization,
+        tmp_path / "eval",
+        batch_size=2,
+    )
+    assert report["model"] == "trlt_self_only__part_attention_hierarchical"
+    assert set(report["metrics"]["group_mse"]) == {"arm", "hand"}
+    assert np.isfinite(report["metrics"]["group_mse"]["arm"])
+    assert np.isfinite(report["metrics"]["group_mse"]["hand"])

@@ -135,6 +135,22 @@ class TactileCNN(nn.Module):
         return x.reshape((b, length, sensors, cfg.embed_dim))
 
 
+class TactileTaxelEncoder(nn.Module):
+    """Shared pad MLP over ordered native taxel axes; no invented image topology."""
+
+    config: ModelConfig
+
+    @nn.compact
+    def __call__(self, tactile, pixel_valid):
+        cfg = self.config
+        if tactile.shape[-3:] != (cfg.num_taxels, 1, 3):
+            raise ValueError("Native tactile must end in [taxels,1,3]")
+        x = jnp.where(pixel_valid, tactile, 0.0)
+        x = x.reshape((*x.shape[:3], cfg.num_taxels * 3))
+        x = nn.Dense(cfg.embed_dim, name="taxel_in")(x)
+        return nn.Dense(cfg.embed_dim, name="taxel_out")(nn.gelu(x))
+
+
 def tactile_masks(batch: Batch):
     tactile = batch["tactile"]
     frame = batch["tactile_valid_mask"].astype(bool)
@@ -168,10 +184,17 @@ class TRLTEncoder(nn.Module):
         camera = self.param("camera_embed", nn.initializers.normal(0.02), (cfg.num_cameras, cfg.embed_dim))
         patch = self.param("patch_embed", nn.initializers.normal(0.02), (patches, cfg.embed_dim))
         visual = visual + (camera[:, None] + patch[None]).reshape((1, nv, cfg.embed_dim))
-        modality = self.param("modality_embed", nn.initializers.normal(0.02), (3, cfg.embed_dim))
+        if cfg.use_modality_embedding:
+            modality = self.param("modality_embed", nn.initializers.normal(0.02), (3, cfg.embed_dim))
+        else:
+            # Remove all visual/tactile/state modality parameters from this encoder.
+            modality = jnp.zeros((3, cfg.embed_dim), visual.dtype)
         visual = visual + modality[0]
         frame_valid, pixel_valid = tactile_masks(batch)
-        tactile = TactileCNN(cfg, name="tactile_cnn")(batch["tactile"], pixel_valid)
+        if cfg.tactile_format == "taxels":
+            tactile = TactileTaxelEncoder(cfg, name="tactile_taxels")(batch["tactile"], pixel_valid)
+        else:
+            tactile = TactileCNN(cfg, name="tactile_cnn")(batch["tactile"], pixel_valid)
         length, sensors = tactile.shape[1:3]
         if sensors != cfg.num_sensors or length > cfg.history_frames:
             raise ValueError("Tactile sensor/history shape differs from model config")
@@ -236,11 +259,10 @@ class TactileDecoder(nn.Module):
             y = nn.gelu(y)
             y = nn.Dense(cfg.embed_dim, name=f"ffn_out_{stage}")(y)
             q = jnp.where(query_valid[..., None], q + y, 0.0)
-        pixels = cfg.tactile_resolution**2 * cfg.tactile_channels
+        height, width = (cfg.num_taxels, 1) if cfg.tactile_format == "taxels" else (cfg.tactile_resolution,) * 2
+        pixels = height * width * cfg.tactile_channels
         output = nn.Dense(pixels, name="output")(q)
-        return output.reshape(
-            (b, length, sensors, cfg.tactile_resolution, cfg.tactile_resolution, cfg.tactile_channels)
-        )
+        return output.reshape((b, length, sensors, height, width, cfg.tactile_channels))
 
 
 def visual_reconstruction_loss(prediction, target, valid):

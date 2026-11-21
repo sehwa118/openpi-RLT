@@ -6,6 +6,10 @@ freezes them, then fits supervised action probes. Online actors/critics, rewards
 action refinement, and action-expert inference/training are outside this pipeline.
 Validation procedures and local execution-report locations are listed in [validation.md](validation.md).
 
+The separate [3DTacDex Assembly preparation](3dtacdex_assembly.md) path downloads,
+audits, and converts all Assembly source versions to local LeRobot v2.1. It does
+not change the T-Rex training protocol or launch an Assembly experiment.
+
 Fusion 구조와 fusion·geometry·encoder sensor ID 제거 실험의 완료 결과 요약은
 [**Fusion Transformer와 Geometry Embedding 실험 정리**](architecture_and_results.md)를 참조하세요.
 
@@ -584,3 +588,41 @@ mesh-derived pad-center proxy, explicit CPU cache preparation, MLP and same-hand
 wrist/tactile 3D RoPE, six example configs and CPU validation evidence. Existing
 four experiment configs and completed results keep their original no-geometry
 meaning. Additional benchmark training and final test were not launched.
+
+## 3DTac-Dex Assembly comparison (2026-11-17)
+
+See [the Assembly experiment plan](3dtacdex_experiments.md) for the native taxel
+adapter, four-model seed0 protocol, fixed grouped split, masked train statistics,
+explicit stage commands and test checkpoint seal. This is separate from the
+completed T-Rex results. Assembly GPU feature extraction/training/final evaluation
+have not been launched by this implementation work.
+
+W&B cadence/config update (2026-11-18): `--wandb-log-every N` controls train metric
+logging in optimizer steps; validation events are always retained and local JSONL
+still records every update. Assembly configs select online W&B and N=10 and
+record native dataset dimensions/ordering plus the representation config in both
+Stage A/B runs. Defaults for older configs remain disabled/N=1. See the
+[Assembly experiment plan](3dtacdex_experiments.md) for batch64/micro64 and bounded
+GPU/offline-SDK verification evidence; no full experiment was launched.
+
+
+3DTac-Dex Assembly의 별도 seed0 실험도 2026-11-18 16:11 UTC에 평가까지
+34단계 모두 완료했다. Original RLT / self / cross / alternating의 주 MSE는
+0.059761 / 0.092136 / 0.090131 / 0.085492이며, 이 설정에서는 RLT가 가장 낮다.
+[Assembly 설정·결과·해석 및 실행 근거](3dtacdex_experiments.md#완료된-assembly-실험-결과-2026-11-18)를 참조한다.
+
+
+Assembly self attention 2층 후속 실험도 2026-11-19 03:26 UTC에 평가까지 완료했다.
+주 MSE 0.081194로 self4 대비11.88% 감소했지만 RLT 대비35.86% 높다.
+[2층 후속 실험 결과와 한계](3dtacdex_experiments.md#self-attention-2층-후속-실험-완료-결과-2026-11-19)를 참조한다.
+
+
+Assembly self2 modality-on 후속 실험은 2026-11-19 07:06 UTC에 최종 평가까지
+완료했다. 주 MSE 0.080930으로 off의0.081194보다0.33% 낮지만, paired trajectory
+95% 차이 구간이0을 포함한다. [Modality ON/OFF 완료 결과](3dtacdex_experiments.md#self-attention-2층-modality-embedding-onoff-완료-결과-2026-11-19)를 참조한다.
+
+
+Assembly tactile의 현재 기본 전처리는 **clip(raw/30,-1,1)**이며 tactile mean/std
+경로는 제거했다(state/action 표준화 유지). Self-only2layers rawclip30 결과는
+주 MSE0.059127821로 기존 self2 대비27.18% 감소했으며 RLT와의 우열은 불확실하다.
+[통합 결과·정규화 정책·실행 근거](3dtacdex_experiments.md#rawclip30-완료-결과-및-tactile-전처리-기본-정책-2026-11-20-확인)를 참조한다.

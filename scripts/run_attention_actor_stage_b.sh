@@ -9,6 +9,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+DATASET="trex_squeeze"
+PROTOCOL_DIR=""
+CONFIG_DIR=""
 LATENT_ROOT=""
 NORMALIZATION=""
 OUT_ROOT=""
@@ -18,7 +21,7 @@ DEVICE="0"
 SEEDS="0 1 2"
 VARIANTS="mlp resmlp part_attention_full part_attention_kinematic part_attention_hierarchical"
 WANDB_MODE="disabled"
-REP_MODEL="trlt_cross_only"
+REP_MODEL=""
 MAX_STEPS=""
 RESUME=0
 DRY_RUN=0
@@ -34,6 +37,11 @@ Required:
   --normalization PATH   Path to normalization.json matching the frozen latent caches
   --out-root PATH        Writable output root (use /workspace/users/<user>/..., never /workspace directly)
 
+Dataset / Assembly options:
+  --dataset NAME         trex_squeeze (default) | 3dtacdex_assembly
+  --protocol-dir PATH    Required for --dataset 3dtacdex_assembly (Assembly protocol dir with protocol.json)
+  --config-dir PATH      Override Stage B probe config directory
+
 Optional:
   --cache-root PATH      Cache root for UV/PIP/HF/XDG/WANDB (default: <out-root>/.cache)
   --python BIN           Python executable (default: python)
@@ -41,17 +49,30 @@ Optional:
   --seeds "0 1 2"        Space-separated seeds to run (default: "0 1 2")
   --variants "..."       Space-separated Stage B variants to run
                          (default: "mlp resmlp part_attention_full part_attention_kinematic part_attention_hierarchical")
-  --rep-model NAME       Stage A representation model name in LatentDataset provenance (default: trlt_cross_only)
+  --rep-model NAME       Stage A representation model name in LatentDataset provenance
+                         (default: trlt_cross_only for trex_squeeze, trlt_self_only for 3dtacdex_assembly)
   --wandb MODE           disabled | offline | online (default: disabled)
   --max-steps N          Optional step cap forwarded to train-probe
   --resume               Forward --resume only to variants that already have a last/metadata.json checkpoint
-  --dry-run              Run trex_offline.py train-probe --dry-run and print evaluate/summarize commands
+  --dry-run              Run trex_offline.py train-probe --dry-run and print seal/evaluate/summarize commands
   -h, --help             Show this help message
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --dataset)
+      DATASET="${2:-}"
+      shift 2
+      ;;
+    --protocol-dir)
+      PROTOCOL_DIR="${2:-}"
+      shift 2
+      ;;
+    --config-dir)
+      CONFIG_DIR="${2:-}"
+      shift 2
+      ;;
     --latent-root)
       LATENT_ROOT="${2:-}"
       shift 2
@@ -122,6 +143,33 @@ if [[ -z "${LATENT_ROOT}" || -z "${NORMALIZATION}" || -z "${OUT_ROOT}" ]]; then
   exit 1
 fi
 
+case "${DATASET}" in
+  trex_squeeze)
+    if [[ -z "${CONFIG_DIR}" ]]; then
+      CONFIG_DIR="${REPO_ROOT}/configs/trlt/attention_actor"
+    fi
+    if [[ -z "${REP_MODEL}" ]]; then
+      REP_MODEL="trlt_cross_only"
+    fi
+    ;;
+  3dtacdex_assembly)
+    if [[ -z "${PROTOCOL_DIR}" ]]; then
+      echo "Error: --protocol-dir is required when --dataset 3dtacdex_assembly." >&2
+      exit 1
+    fi
+    if [[ -z "${CONFIG_DIR}" ]]; then
+      CONFIG_DIR="${REPO_ROOT}/configs/trlt/3dtacdex_assembly/attention_actor"
+    fi
+    if [[ -z "${REP_MODEL}" ]]; then
+      REP_MODEL="trlt_self_only"
+    fi
+    ;;
+  *)
+    echo "Error: --dataset must be trex_squeeze or 3dtacdex_assembly (got '${DATASET}')." >&2
+    exit 1
+    ;;
+esac
+
 if [[ -z "${REP_MODEL}" ]]; then
   echo "Error: --rep-model must be non-empty." >&2
   exit 1
@@ -186,19 +234,19 @@ CACHE_CLEAN="${CACHE_CLEAN:-/}"
 config_for_variant() {
   case "$1" in
     mlp)
-      echo "${REPO_ROOT}/configs/trlt/attention_actor/probe_mlp.json"
+      echo "${CONFIG_DIR}/probe_mlp.json"
       ;;
     resmlp)
-      echo "${REPO_ROOT}/configs/trlt/attention_actor/probe_resmlp.json"
+      echo "${CONFIG_DIR}/probe_resmlp.json"
       ;;
     part_attention_full)
-      echo "${REPO_ROOT}/configs/trlt/attention_actor/probe_part_attn_full.json"
+      echo "${CONFIG_DIR}/probe_part_attn_full.json"
       ;;
     part_attention_kinematic)
-      echo "${REPO_ROOT}/configs/trlt/attention_actor/probe_part_attn_kinematic.json"
+      echo "${CONFIG_DIR}/probe_part_attn_kinematic.json"
       ;;
     part_attention_hierarchical)
-      echo "${REPO_ROOT}/configs/trlt/attention_actor/probe_part_attn_hierarchical.json"
+      echo "${CONFIG_DIR}/probe_part_attn_hierarchical.json"
       ;;
     *)
       echo "Error: unknown Stage B variant '$1'." >&2
@@ -239,12 +287,13 @@ for seed in "${SEED_LIST[@]}"; do
   TRAIN_LATENTS="${LATENT_ROOT%/}/seed${seed}/train"
   VAL_LATENTS="${LATENT_ROOT%/}/seed${seed}/validation"
   TEST_LATENTS="${LATENT_ROOT%/}/seed${seed}/test"
+  SEAL_PATH="${OUT_CLEAN}/logs/seed${seed}/stage_b_selections.json"
+  SEAL_PROBE_ARGS=()
 
   for variant in "${VARIANT_LIST[@]}"; do
     CFG="$(config_for_variant "${variant}")"
     CKPT_DIR="${OUT_CLEAN}/checkpoints/seed${seed}/probe_${variant}"
     LOG_DIR="${OUT_CLEAN}/logs/seed${seed}/probe_${variant}"
-    EVAL_DIR="${OUT_CLEAN}/logs/seed${seed}/eval_${variant}"
 
     TRAIN_CMD=(
       "${PYTHON_BIN}" "${REPO_ROOT}/scripts/trex_offline.py" train-probe
@@ -264,6 +313,36 @@ for seed in "${SEED_LIST[@]}"; do
       TRAIN_CMD+=(--resume)
     fi
 
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      "${TRAIN_CMD[@]}" --dry-run
+    else
+      "${TRAIN_CMD[@]}"
+    fi
+    SEAL_PROBE_ARGS+=(--probe "${variant}=${CKPT_DIR}/best")
+  done
+
+  if [[ "${DATASET}" == "3dtacdex_assembly" ]]; then
+    SEAL_CMD=(
+      "${PYTHON_BIN}" "${REPO_ROOT}/scripts/prepare_tacdex_experiment.py" seal-probes
+      --protocol-dir "${PROTOCOL_DIR}"
+      --seed "${seed}"
+      --output "${SEAL_PATH}"
+      "${SEAL_PROBE_ARGS[@]}"
+    )
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      printf '[dry-run seal-probes]'
+      printf ' %q' "${SEAL_CMD[@]}"
+      printf '\n'
+    else
+      "${SEAL_CMD[@]}"
+    fi
+  fi
+
+  for variant in "${VARIANT_LIST[@]}"; do
+    CFG="$(config_for_variant "${variant}")"
+    CKPT_DIR="${OUT_CLEAN}/checkpoints/seed${seed}/probe_${variant}"
+    EVAL_DIR="${OUT_CLEAN}/logs/seed${seed}/eval_${variant}"
+
     EVAL_CMD=(
       "${PYTHON_BIN}" "${REPO_ROOT}/scripts/trex_offline.py" evaluate
       --config "${CFG}"
@@ -274,14 +353,15 @@ for seed in "${SEED_LIST[@]}"; do
       --normalization "${NORMALIZATION}"
       --output-dir "${EVAL_DIR}"
     )
+    if [[ "${DATASET}" == "3dtacdex_assembly" ]]; then
+      EVAL_CMD+=(--protocol-dir "${PROTOCOL_DIR}" --selection-seal "${SEAL_PATH}")
+    fi
 
     if [[ "${DRY_RUN}" -eq 1 ]]; then
-      "${TRAIN_CMD[@]}" --dry-run
       printf '[dry-run evaluate]'
       printf ' %q' "${EVAL_CMD[@]}"
       printf '\n'
     else
-      "${TRAIN_CMD[@]}"
       "${EVAL_CMD[@]}"
     fi
     EVAL_METRICS+=("${EVAL_DIR}/metrics.json")

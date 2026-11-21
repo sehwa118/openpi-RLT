@@ -69,8 +69,11 @@ class ModelConfig:
     decoder_layers: int = 2
     mlp_ratio: float = 4.0
     dropout_rate: float = 0.0
+    use_modality_embedding: bool = True
     use_sensor_id_embedding: bool = True
     num_sensors: int = 10
+    tactile_format: Literal["image", "taxels"] = "image"
+    num_taxels: int = 15
     tactile_channels: int = 1
     tactile_resolution: int = 64
     history_frames: int = 10
@@ -108,6 +111,12 @@ class ModelConfig:
             <= 0
         ):
             raise ValueError("Model dimensions and layer counts must be positive")
+        if self.tactile_format not in ("image", "taxels") or self.num_taxels <= 0:
+            raise ValueError("Invalid tactile format/taxel count")
+        if self.tactile_format == "taxels" and (self.tactile_channels != 3 or self.geometry_mode != "none"):
+            raise ValueError("Native taxels require three axes and disabled geometry")
+        if not isinstance(self.use_modality_embedding, bool):
+            raise ValueError("use_modality_embedding must be a boolean")
         if not isinstance(self.use_sensor_id_embedding, bool):
             raise ValueError("use_sensor_id_embedding must be a boolean")
         if self.mode == "rlt_original" and not self.use_sensor_id_embedding:
@@ -218,6 +227,11 @@ def config_dict(config):
 def model_config_dict(config):
     """Keep disabled-geometry checkpoint identity compatible with pre-geometry runs."""
     value = asdict(config)
+    if config.tactile_format == "image":
+        value.pop("tactile_format")
+        value.pop("num_taxels")
+    if config.use_modality_embedding:
+        value.pop("use_modality_embedding")
     if config.use_sensor_id_embedding:
         value.pop("use_sensor_id_embedding")
     if config.geometry_mode == "none":

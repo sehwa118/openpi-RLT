@@ -285,6 +285,8 @@ class Pi0(_model.BaseModel):
         *,
         train: bool = False,
         image_only: bool = False,
+        image_keys: tuple[str, ...] = _model.IMAGE_KEYS,
+        prefix_microbatch_size: int | None = None,
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"]]:
         """Extract post-transformer prefix embeddings for RLT encoder input.
 
@@ -295,7 +297,9 @@ class Pi0(_model.BaseModel):
             image_only: If True, return only image token embeddings (drop language tokens).
                 Per RLT paper: "we drop language embeddings in this step" for fixed-instruction tasks.
         """
-        observation = _model.preprocess_observation(rng if train else None, observation, train=train)
+        observation = _model.preprocess_observation(
+            rng if train else None, observation, train=train, image_keys=image_keys
+        )
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
 
         # Image tokens come first, language tokens follow.
@@ -304,7 +308,19 @@ class Pi0(_model.BaseModel):
 
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
-        (prefix_out, _), _ = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        if prefix_microbatch_size is None:
+            (prefix_out, _), _ = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        elif prefix_microbatch_size == 1:
+            # Preserve batch1 Gemma arithmetic while batching image encoding/transfer.
+            # The pure Linen apply path reads frozen params and has no mutable state.
+            def one(inputs):
+                token, mask, position = inputs
+                (output, _), _ = self.PaliGemma.llm([token[None], None], mask=mask[None], positions=position[None])
+                return output[0]
+
+            prefix_out = jax.lax.map(one, (prefix_tokens, prefix_attn_mask, positions))
+        else:
+            raise ValueError("Only prefix_microbatch_size=1 or None is supported")
 
         if image_only:
             prefix_out = prefix_out[:, :num_image_tokens]

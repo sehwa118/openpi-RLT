@@ -20,9 +20,14 @@ def main():
     parser.add_argument("--extract", action="store_true", help="Execute extraction; otherwise print plan only")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--force-cache-rebuild", action="store_true")
+    parser.add_argument("--selection-seal")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--prefix-microbatch-size", type=int, choices=(1,))
+    parser.add_argument("--num-workers", type=int)
+    parser.add_argument("--prefetch-factor", type=int)
     args = parser.parse_args()
     os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.device if args.extract and not args.plan_only else ""
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     os.environ["JAX_PLATFORMS"] = "cuda" if args.extract and not args.plan_only else "cpu"
     from openpi.trlt.config import TemporalConfig
@@ -35,18 +40,33 @@ def main():
     data_root = root_path(args.data_root or config.get("data_root", "datasets/trex_squeeze"))
     split_manifest = root_path(args.split_manifest) if args.split_manifest else data_root / "splits.json"
     normalization = root_path(args.normalization) if args.normalization else data_root / "normalization.json"
-    output_dir = root_path(args.output_dir) if args.output_dir else data_root / "visual_cache"
+    output_dir = (
+        root_path(args.output_dir or config.get("visual_cache"))
+        if args.output_dir or config.get("visual_cache")
+        else data_root / "visual_cache"
+    )
     backbone = args.backbone_checkpoint or config.get(
         "backbone_checkpoint", "checkpoints/openpi-assets/checkpoints/pi05_base/params"
     )
-    dataset = TrexDataset(
-        data_root=data_root,
-        split_manifest=split_manifest,
-        normalization=normalization,
-        split=args.split,
-        temporal=temporal,
-        tactile_resolution=config["model"]["tactile_resolution"],
-    )
+    if config.get("dataset_kind") == "3dtacdex_assembly":
+        from openpi.trlt.tacdex_data import AssemblyDataset
+
+        if args.split_manifest or args.normalization:
+            raise ValueError("Assembly reads the sealed protocol from config.protocol_dir")
+        if args.split == "test" and args.extract and not args.plan_only:
+            from openpi.trlt.tacdex_experiment import validate_selection_seal
+
+            validate_selection_seal(args.selection_seal, protocol_dir=config["protocol_dir"])
+        dataset = AssemblyDataset(data_root, config["protocol_dir"], split=args.split, temporal=temporal)
+    else:
+        dataset = TrexDataset(
+            data_root=data_root,
+            split_manifest=split_manifest,
+            normalization=normalization,
+            split=args.split,
+            temporal=temporal,
+            tactile_resolution=config["model"]["tactile_resolution"],
+        )
     # Source provenance must come from the pinned selection, not a caller-supplied mutable revision.
     provenance = dataset.provenance
     result = extract_visual_cache(
@@ -60,6 +80,18 @@ def main():
         episode_ids=args.episode_ids,
         force=args.force_cache_rebuild,
         plan_only=not args.extract or args.plan_only,
+        prefix_microbatch_size=args.prefix_microbatch_size
+        if args.prefix_microbatch_size is not None
+        else config.get("feature_extraction", {}).get("prefix_microbatch_size"),
+        batch_size=args.batch_size
+        if args.batch_size is not None
+        else config.get("feature_extraction", {}).get("batch_size", 1),
+        num_workers=args.num_workers
+        if args.num_workers is not None
+        else config.get("feature_extraction", {}).get("num_workers", 0),
+        prefetch_factor=args.prefetch_factor
+        if args.prefetch_factor is not None
+        else config.get("feature_extraction", {}).get("prefetch_factor", 2),
     )
     print(json.dumps(result, indent=2))
 
