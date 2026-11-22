@@ -307,8 +307,13 @@ class TouchLatentDataset:
                 raise ValueError(f"Touch cache file changed: {name}")
         lat_prov, touch_prov = getattr(latents, "provenance", {}), self.manifest["provenance"]
         for key in (*JOIN_PROVENANCE_KEYS, "split"):
-            if touch_prov.get(key) is not None and digest(lat_prov.get(key)) != digest(touch_prov.get(key)):
-                raise ValueError(f"Touch cache / latent provenance mismatch: {key}")
+            # Value equality (not a JSON digest): config files store fps=5.0 while the dataset
+            # default is fps=5; both describe the same temporal contract.
+            if touch_prov.get(key) is not None and lat_prov.get(key) != touch_prov.get(key):
+                raise ValueError(
+                    f"Touch cache / latent provenance mismatch: {key}: "
+                    f"latent={lat_prov.get(key)!r} touch={touch_prov.get(key)!r}"
+                )
         if finger_order is None:
             action_dim = int(np.asarray(latents[0]["proprioception"]).shape[-1])
             finger_order = tuple(p.name for p in part_specs_for_dim(action_dim) if p.role == "finger")

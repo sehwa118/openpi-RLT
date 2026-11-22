@@ -213,6 +213,23 @@ def test_touch_latent_join_reorders_fingers_and_checks_provenance(tmp_path):
         TouchLatentDataset(val_latents, cache)
 
 
+def test_join_accepts_int_float_temporal_but_rejects_real_differences(tmp_path):
+    """Server failure 2026-11-22: config fps=5.0 vs dataset default fps=5 must join."""
+    eps = _episodes()
+    cache = _cache(tmp_path, eps, "train", source="raw")
+    manifest = json.loads((cache / "manifest.json").read_text())
+    assert manifest["provenance"]["temporal"] == {"fps": 5}
+    for temporal, ok in (({"fps": 5.0}, True), ({"fps": 3}, False)):
+        path = tmp_path / f"lat_{temporal['fps']}"
+        latents = _write_latents(path, eps, "train", np.random.default_rng(0))
+        latents.provenance = dict(latents.provenance, temporal=temporal)
+        if ok:
+            assert len(TouchLatentDataset(latents, cache)) == 16
+        else:
+            with pytest.raises(ValueError, match="temporal"):
+                TouchLatentDataset(latents, cache)
+
+
 def test_touch_probe_initially_equals_part_attention():
     """Zero-initialized touch gates: H1/H2/H3 start as exactly the H0 function (fair comparison)."""
     base = ProbeConfig(
