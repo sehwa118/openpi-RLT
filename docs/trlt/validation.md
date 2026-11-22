@@ -129,3 +129,10 @@ Primary MSE:MLP0.066686607, RoPE0.076711648. Historical ID-on comparisons also
 change Stage A budget15000→10000; both paired95% intervals include zero.
 See [the combined results summary](architecture_and_results.md). No new training,
 extraction or evaluation ran during this documentation update.
+
+
+LingBot-Touch preparation completed on2026-11-22: both branches' implementations,
+complete train/validation frozen tactile caches, actual reader/two-worker equivalence,
+and one actual-data full-shape GPU optimizer check per dataset passed. Master evidence:
+`experiments/trlt/lingbot_touch_validation/ready_to_train.md` and `ready_to_train.json`.
+The new benchmark Stage A/B runs and source test extraction/evaluation remain unrun.

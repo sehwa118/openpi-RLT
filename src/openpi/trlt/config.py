@@ -58,6 +58,9 @@ class TemporalConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     mode: Literal["rlt_original", "trlt_self_only", "trlt_cross_only", "trlt_alternating"] = "trlt_alternating"
+    tactile_encoder: Literal["cnn", "lingbot_touch"] = "cnn"
+    tactile_feature_dim: int = 768
+    tactile_time_tau: float = 0.15
     input_dim: int = 2048
     embed_dim: int = 512
     num_heads: int = 8
@@ -86,6 +89,12 @@ class ModelConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "cnn_channels", tuple(self.cnn_channels))
+        if self.tactile_encoder not in ("cnn", "lingbot_touch"):
+            raise ValueError("Unknown tactile encoder")
+        if self.tactile_feature_dim <= 0 or not math.isfinite(self.tactile_time_tau) or self.tactile_time_tau <= 0:
+            raise ValueError("Invalid tactile feature dimension or temporal decay")
+        if self.tactile_encoder == "lingbot_touch" and (self.mode == "rlt_original" or self.geometry_mode != "none"):
+            raise ValueError("LingBot requires TRLT with fusion geometry disabled")
         if (
             min(
                 self.input_dim,
@@ -178,6 +187,9 @@ def config_dict(config):
 def model_config_dict(config):
     """Keep disabled-geometry checkpoint identity compatible with pre-geometry runs."""
     value = asdict(config)
+    if config.tactile_encoder == "cnn":
+        for key in ("tactile_encoder", "tactile_feature_dim", "tactile_time_tau"):
+            value.pop(key)
     if config.use_sensor_id_embedding:
         value.pop("use_sensor_id_embedding")
     if config.geometry_mode == "none":

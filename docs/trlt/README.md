@@ -584,3 +584,16 @@ mesh-derived pad-center proxy, explicit CPU cache preparation, MLP and same-hand
 wrist/tactile 3D RoPE, six example configs and CPU validation evidence. Existing
 four experiment configs and completed results keep their original no-geometry
 meaning. Additional benchmark training and final test were not launched.
+
+## LingBot-Touch-Tiny integration planning (2026-11-22)
+
+[통합 계획과 센서별 입력 계약](lingbot_touch_plan.md): upstream source와 tiny weights를
+다운로드하고 bounded CPU 추론을 확인했다. Frozen encoder/cache, taxel mean 및 고정
+지수 감쇠 시간 pooling으로 센서당 한 token을 만드는 T-Rex self4 / Assembly self2 계획이다.
+프로젝트 통합, 실제 데이터 특징 추출, GPU 검증, Stage A/B 및 평가는 아직 실행하지 않았다.
+
+
+LingBot-Touch 후속 구현과 T-Rex 학습 명령은 [사용 안내](lingbot_touch.md)를 참조한다.
+CPU 회귀·축소 A/B 및 실제 GPU/cache 준비 증거는
+`experiments/trlt/lingbot_touch_validation/`에 별도로 기록한다. 이 경로의
+실제 완료 보고서가 최초 계획 문서의 구현 전 상태보다 우선한다.

@@ -48,6 +48,7 @@ def parser():
             command.add_argument("--split-manifest")
             command.add_argument("--normalization")
             command.add_argument("--visual-cache")
+            command.add_argument("--tactile-cache")
         if name == "export-latents":
             command.add_argument("--representation-checkpoint", required=True)
             command.add_argument("--split", choices=("train", "validation", "test"), default="train")
@@ -96,6 +97,8 @@ def main(argv=None):
         raise ValueError("Model/probe and temporal configuration disagree")
     if config.state_dim != 58 or probe.action_dim != 58:
         raise ValueError("T-Rex probe preserves all 58 state/action dimensions")
+    if args.command == "smoke" and config.tactile_encoder == "lingbot_touch":
+        raise ValueError("LingBot uses explicit training/export with prepared tactile cache")
     if args.command == "smoke" and not config.use_sensor_id_embedding:
         raise ValueError("Sensor ID ablation requires its explicit config and training/export stages")
     if args.command == "smoke" and config.geometry_mode != "none":
@@ -139,6 +142,8 @@ def main(argv=None):
     tracking = {key: getattr(args, "wandb_" + key, None) for key in ("project", "entity", "name", "group")}
     tracking["mode"] = getattr(args, "wandb", "disabled")
     variant = config.mode if config.geometry_mode == "none" else f"geometry_{config.geometry_mode}/{config.mode}"
+    if config.tactile_encoder == "lingbot_touch":
+        variant = "lingbot_touch_tiny96/" + variant
     if not config.use_sensor_id_embedding:
         variant = "no_sensor_id/" + variant
     base = f"checkpoints/trlt/{variant}/seed{args.seed}"
@@ -160,7 +165,7 @@ def main(argv=None):
         cache = FeatureCache(root_path(args.visual_cache) if args.visual_cache else data_root / "visual_cache")
 
         def dataset(split):
-            return TrexDataset(
+            result = TrexDataset(
                 data_root,
                 split_path,
                 norm_path,
@@ -170,6 +175,15 @@ def main(argv=None):
                 visual_cache=cache,
                 geometry_spec=config.geometry_spec if config.geometry_mode != "none" else None,
             )
+            if config.tactile_encoder == "lingbot_touch":
+                from openpi.trlt.lingbot_touch import WithTactileFeatures
+
+                settings = raw.get("tactile_features", {})
+                directory = args.tactile_cache or settings.get("cache")
+                if not directory:
+                    raise ValueError("LingBot requires an explicit frozen tactile cache")
+                result = WithTactileFeatures(result, directory, settings)
+            return result
 
         if args.command == "train-representation":
             result = train_representation(

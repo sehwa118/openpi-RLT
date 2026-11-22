@@ -47,6 +47,9 @@ OBSERVATION_FIELDS = (
     "tactile_valid_mask",
     "spatial_valid_mask",
     "tactile_timestamps",
+    "tactile_features",
+    "tactile_feature_valid_mask",
+    "tactile_feature_timestamps",
     "tactile_positions",
     "geometry_valid_mask",
     "proprioception",
@@ -63,6 +66,7 @@ def _progress(message):
 
 SHARED_PROVENANCE_KEYS = (
     "geometry_hash",
+    "tactile_feature_cache_hash",
     "revision",
     "dataset_revision",
     "split_hash",
@@ -86,6 +90,8 @@ SHARED_PROVENANCE_KEYS = (
 
 
 def _check_provenance(expected, actual, label):
+    if expected.get("tactile_feature_cache_hash") != actual.get("tactile_feature_cache_hash"):
+        raise ValueError(f"{label} provenance mismatch: tactile_feature_cache_hash")
     if expected.get("geometry_hash") != actual.get("geometry_hash"):
         raise ValueError(f"{label} provenance mismatch: geometry_hash")
     for key in SHARED_PROVENANCE_KEYS:
@@ -225,10 +231,21 @@ def assert_gpu():
 def collate(samples, fields):
     if not samples:
         raise ValueError("Empty batch")
-    required = set(fields) - {"spatial_valid_mask", "tactile_positions", "geometry_valid_mask"}
+    optional = {
+        "spatial_valid_mask",
+        "tactile_positions",
+        "geometry_valid_mask",
+        "tactile_features",
+        "tactile_feature_valid_mask",
+        "tactile_feature_timestamps",
+    }
+    required = set(fields) - optional
     if any(not required.issubset(sample) for sample in samples):
         raise ValueError(f"Missing tensor field(s); expected {sorted(required)}")
     for sample in samples:
+        lingbot_fields = {"tactile_features", "tactile_feature_valid_mask", "tactile_feature_timestamps"}
+        if set(sample) & lingbot_fields and not lingbot_fields.issubset(sample):
+            raise ValueError("LingBot features, timestamps and validity must be supplied together")
         if ("tactile_positions" in sample) != ("geometry_valid_mask" in sample):
             raise ValueError("Geometry positions and validity mask must be supplied together")
     output = {}

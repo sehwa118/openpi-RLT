@@ -332,3 +332,58 @@ This is a historical handoff, not a live process-status report. Verify later art
   selected steps and links to the final report/historical_comparisons.json.
   This supersedes earlier launch/preflight-only observations; do not restart
   or duplicate the completed queue. No training/evaluation was rerun for summary.
+
+### LingBot-Touch-Tiny planning: 2026-11-22
+
+- User requested source/weight download and implementation planning first, for T-Rex
+  self-only and 3DTac-Dex Assembly self-only2layers. Confirmed frozen encoder + cache,
+  taxel mean and fixed exponential temporal pooling, one fusion token per sensor.
+- Plan: `docs/trlt/lingbot_touch_plan.md`. Source clone `third_party/lingbot-touch/`
+  at `dec8025b212e7099b235cc2ef13a4921a7e59545` is ignored. Bundle under
+  `checkpoints/lingbot-touch-tiny/`, HF revision `f23969ccd4b6bba2163e69cc05a577455a075fe9`.
+- Existing uv environment successfully strict-loaded tiny on CPU: output768D,
+  tubelet2, frozen target encoder. Five bounded CPU cases passed; actual evidence
+  `experiments/trlt/lingbot_touch_planning/cpu_smoke.json`. No dependency installation,
+  GPU work, dataset cache extraction, project model integration or Stage A/B run.
+- Assembly implementation was inspected from local branch `TRLT-3DTacDex` without
+  switching/merging. Public original 3DTacDex code has15-taxel tip/pulp coordinates;
+  mapping to dataset values, canonical geometry and signal axes/ranges still need
+  validation. Native240 T-Rex sampling also needs canonical-right layout validation.
+  Temporal padding and tau defaults are proposals, not completed validation.
+- User subsequently fixed T-Rex96points, separate PaXini tip/pulp encoding, and
+  signed XYZ clip(raw/30,-1,1), including Z. Plan interprets separate encoding as
+  two four-finger groups sharing weights. Bypass upstream normalization helper
+  (it clips Z to[0,1]); low-level encode preserves signed inputs by code inspection.
+  This signed-input inference and dataset integration have not been run.
+
+### LingBot implementation authorized: 2026-11-22
+
+- Latest user supersedes separate PaXini tip/pulp encoding: encode all8pads jointly,
+  four actual fingers ×(tip15+pulp15), pinky excluded, pool output to8pad tokens.
+  T-Rex uses96points; XYZ signed raw_clip30, fixed tau0.15/0.20seconds and prefix
+  history3→4 duplication accepted. Frozen encoder/cache; seed0 and prior A/B budgets.
+- User explicitly requested parallel agents on TRLT and TRLT-3DTacDex and allowed GPU
+  use for implementation validation/preparation. Main benchmark training/test evaluation
+  is not requested. Preserve other user jobs. Branch TRLT-3DTacDex has a dedicated
+  worktree at `.worktrees/lingbot-tacdex/`; existing uv env/data/weights are shared.
+  Set PYTHONPATH to its src when using the shared editable uv environment.
+
+
+### LingBot training preparation complete: 2026-11-22
+
+- User-authorized multi-agent implementation completed in TRLT and TRLT-3DTacDex;
+  actual readiness: `experiments/trlt/lingbot_touch_validation/ready_to_train.md`
+  and `ready_to_train.json`. Main benchmark training and final test remain unrun.
+- Complete frozen tactile caches: T-Rex35,597train/7,359validation queries under
+  `datasets/trex_squeeze/lingbot_touch_tiny96/`; Assembly14,819train/3,472validation
+  under `datasets/3dtacdex_assembly/lingbot_touch_cache/paxini_joint_v1/`. Reuse them.
+- Both actual reader/2-worker checks exactly matched. Actual-data GPU checks each
+  passed1optimizer update: T-Rexbatch32/micro4 and Assemblybatch64/micro64.
+  These isolated checkpoints are not benchmark runs or resume targets.
+- Shared training env Torchcu126 lacks Blackwellsm120 kernels; separate ignored
+  `.venv-lingbot-touch` uses Torch2.7.1+cu128 for extraction only. Setup script is
+  `scripts/setup_lingbot_extraction_env.sh`; existing JAX training env/auth unchanged.
+- T-Rex source-native left/right identity and PaXini approximate static geometry
+  assumptions are explicit in docs; do not claim calibrated canonical alignment.
+  Adapter content hashes are cache identity: changing adapter source invalidates
+  existing caches; preserve old outputs and inspect provenance before any rebuild.

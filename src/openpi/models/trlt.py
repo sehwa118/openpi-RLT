@@ -152,6 +152,24 @@ def relative_times(batch: Batch):
     return jnp.where(valid, ts - batch["query_timestamp"][:, None, None], 0.0)
 
 
+def pool_lingbot_features(batch, tau):
+    """Masked temporal softmax over already taxel-pooled frozen tubelets."""
+    features = batch["tactile_features"]
+    timestamps = batch["tactile_feature_timestamps"]
+    valid = batch["tactile_feature_valid_mask"].astype(bool)
+    if features.ndim != 4 or timestamps.shape != features.shape[:-1] or valid.shape != timestamps.shape:
+        raise ValueError("LingBot expects features[B,K,S,D] and timestamps/valid[B,K,S]")
+    relative = timestamps - batch["query_timestamp"][:, None, None]
+    valid = valid & jnp.isfinite(timestamps) & jnp.all(jnp.isfinite(features), axis=-1) & (relative <= 1e-6)
+    scores = jnp.where(valid, relative / tau, jnp.finfo(jnp.float32).min)
+    weights = jax.nn.softmax(scores, axis=1)
+    weights = jnp.where(valid, weights, 0.0)
+    weights = weights / jnp.maximum(jnp.sum(weights, axis=1, keepdims=True), 1e-20)
+    pooled = jnp.sum(jnp.where(valid[..., None], features, 0.0) * weights[..., None], axis=1)
+    relative = jnp.sum(jnp.where(valid, relative, 0.0) * weights, axis=1)
+    return pooled, jnp.any(valid, axis=1), relative
+
+
 class TRLTEncoder(nn.Module):
     config: ModelConfig
 
@@ -171,28 +189,44 @@ class TRLTEncoder(nn.Module):
         modality = self.param("modality_embed", nn.initializers.normal(0.02), (3, cfg.embed_dim))
         visual = visual + modality[0]
         frame_valid, pixel_valid = tactile_masks(batch)
-        tactile = TactileCNN(cfg, name="tactile_cnn")(batch["tactile"], pixel_valid)
-        length, sensors = tactile.shape[1:3]
-        if sensors != cfg.num_sensors or length > cfg.history_frames:
-            raise ValueError("Tactile sensor/history shape differs from model config")
-        if cfg.use_sensor_id_embedding:
-            sensor = self.param("sensor_embed", nn.initializers.normal(0.02), (cfg.num_sensors, cfg.embed_dim))
+        if cfg.tactile_encoder == "lingbot_touch":
+            tactile, tactile_valid, relative = pool_lingbot_features(batch, cfg.tactile_time_tau)
+            if tactile.shape[-2:] != (cfg.num_sensors, cfg.tactile_feature_dim):
+                raise ValueError("LingBot sensor/feature dimensions differ from model config")
+            tactile = nn.Dense(cfg.embed_dim, name="lingbot_projection")(jax.lax.stop_gradient(tactile))
+            relative = relative[..., None]
+            if cfg.use_sensor_id_embedding:
+                sensor = self.param("sensor_embed", nn.initializers.normal(0.02), (cfg.num_sensors, cfg.embed_dim))
+            else:
+                sensor = jnp.zeros((cfg.num_sensors, cfg.embed_dim), tactile.dtype)
+            time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
+            time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))
+            tactile = tactile + sensor[None] + modality[1] + time
+            geometry = None
         else:
-            # Ablate encoder identity only; decoder sensor queries define output slots.
-            sensor = jnp.zeros((cfg.num_sensors, cfg.embed_dim), tactile.dtype)
-        relative = relative_times(batch)[..., None]
-        time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
-        time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))
-        tactile = tactile + sensor[None, None] + modality[1] + time
-        geometry = None
-        if cfg.geometry_mode != "none":
-            points, geometry_valid, geometry = fusion_geometry(batch, frame_valid, visual_valid, cfg)
-            if cfg.geometry_mode == "mlp":
-                embedding = nn.Dense(cfg.geometry_mlp_hidden, name="geometry_in")(points)
-                embedding = nn.Dense(cfg.embed_dim, name="geometry_out")(nn.gelu(embedding))
-                tactile = tactile + jnp.where(geometry_valid[..., None], embedding, 0)
-                geometry = None
-        tactile = tactile.reshape((tactile.shape[0], length * sensors, cfg.embed_dim))
+            tactile = TactileCNN(cfg, name="tactile_cnn")(batch["tactile"], pixel_valid)
+            length, sensors = tactile.shape[1:3]
+            if sensors != cfg.num_sensors or length > cfg.history_frames:
+                raise ValueError("Tactile sensor/history shape differs from model config")
+            if cfg.use_sensor_id_embedding:
+                sensor = self.param("sensor_embed", nn.initializers.normal(0.02), (cfg.num_sensors, cfg.embed_dim))
+            else:
+                # Ablate encoder identity only; decoder sensor queries define output slots.
+                sensor = jnp.zeros((cfg.num_sensors, cfg.embed_dim), tactile.dtype)
+            relative = relative_times(batch)[..., None]
+            time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
+            time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))
+            tactile = tactile + sensor[None, None] + modality[1] + time
+            geometry = None
+            if cfg.geometry_mode != "none":
+                points, geometry_valid, geometry = fusion_geometry(batch, frame_valid, visual_valid, cfg)
+                if cfg.geometry_mode == "mlp":
+                    embedding = nn.Dense(cfg.geometry_mlp_hidden, name="geometry_in")(points)
+                    embedding = nn.Dense(cfg.embed_dim, name="geometry_out")(nn.gelu(embedding))
+                    tactile = tactile + jnp.where(geometry_valid[..., None], embedding, 0)
+                    geometry = None
+            tactile = tactile.reshape((tactile.shape[0], length * sensors, cfg.embed_dim))
+            tactile_valid = frame_valid.reshape((tactile.shape[0], -1))
         age = (batch["query_timestamp"] - batch["visual_timestamp"])[..., None]
         if batch["proprioception"].shape[-1] != cfg.state_dim:
             raise ValueError("State dimension mismatch")
@@ -200,9 +234,7 @@ class TRLTEncoder(nn.Module):
         state = nn.Dense(cfg.embed_dim, name="state_in")(state)
         state = nn.Dense(cfg.embed_dim, name="state_out")(nn.gelu(state)) + modality[2]
         other = jnp.concatenate((tactile, state[:, None]), axis=1)
-        other_valid = jnp.concatenate(
-            (frame_valid.reshape((state.shape[0], -1)), jnp.ones((state.shape[0], 1), bool)), axis=1
-        )
+        other_valid = jnp.concatenate((tactile_valid, jnp.ones((state.shape[0], 1), bool)), axis=1)
         return Fusion(cfg, name="fusion")(visual, other, visual_valid, other_valid, train=train, geometry=geometry)[0]
 
 

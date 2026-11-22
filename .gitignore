@@ -184,3 +184,10 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .sisyphus/
+
+# Locally downloaded upstream LingBot-Touch source (revision pinned in docs/trlt/lingbot_touch_plan.md).
+/third_party/lingbot-touch/
+
+/.worktrees/
+
+/.venv-lingbot-touch/
