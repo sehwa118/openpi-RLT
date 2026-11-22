@@ -62,9 +62,12 @@ def parser():
         if name == "train-probe":
             command.add_argument("--train-latents", required=True)
             command.add_argument("--validation-latents", required=True)
+            command.add_argument("--train-touch", help="Touch-token cache (touch_part_attention probes only)")
+            command.add_argument("--validation-touch", help="Touch-token cache (touch_part_attention probes only)")
         if name == "evaluate":
             command.add_argument("--protocol-dir", help="Assembly grouped protocol directory")
             command.add_argument("--latents", required=True)
+            command.add_argument("--touch", help="Touch-token cache (touch_part_attention probes only)")
             command.add_argument("--probe-checkpoint", required=True)
             command.add_argument("--normalization", required=True)
             command.add_argument("--batch-size", type=int, default=256)
@@ -74,6 +77,21 @@ def parser():
     summary.add_argument("--bootstrap-samples", type=int, default=2000)
     summary.add_argument("--baseline", default="rlt_original")
     return root
+
+
+def _probe_dataset(probe, latents, touch):
+    """LatentDataset, joined with a touch-token cache exactly when the probe consumes touch tokens."""
+    from openpi.trlt.runner import LatentDataset
+
+    needs_touch = probe.architecture == "touch_part_attention"
+    if needs_touch != (touch is not None):
+        raise ValueError("touch_part_attention requires touch caches (--*-touch); other probes must not pass them")
+    dataset = LatentDataset(latents)
+    if not needs_touch:
+        return dataset
+    from openpi.trlt.touch_tokens import TouchLatentDataset
+
+    return TouchLatentDataset(dataset, touch)
 
 
 def main(argv=None):
@@ -189,7 +207,6 @@ def main(argv=None):
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     os.environ["JAX_PLATFORMS"] = "cuda"
     os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
-    from openpi.trlt.runner import LatentDataset
     from openpi.trlt.runner import assert_gpu
     from openpi.trlt.runner import evaluate_action_probe
     from openpi.trlt.runner import export_frozen_latents
@@ -278,8 +295,8 @@ def main(argv=None):
             "probe" if probe.architecture == "mlp" and not probe.variant_tag else f"probe_{probe_variant_name(probe)}"
         )
         result = train_action_probe(
-            LatentDataset(args.train_latents),
-            LatentDataset(args.validation_latents),
+            _probe_dataset(probe, args.train_latents, args.train_touch),
+            _probe_dataset(probe, args.validation_latents, args.validation_touch),
             probe,
             args.output_dir or f"{base}/{probe_suffix}",
             seed=args.seed,
@@ -298,7 +315,7 @@ def main(argv=None):
             else f"evaluation_{probe_variant_name(probe)}"
         )
         result = evaluate_action_probe(
-            LatentDataset(args.latents),
+            _probe_dataset(probe, args.latents, args.touch),
             args.probe_checkpoint,
             args.normalization,
             args.output_dir or f"{logs}/{eval_suffix}",

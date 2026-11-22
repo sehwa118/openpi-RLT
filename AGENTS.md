@@ -731,3 +731,25 @@ This is a historical handoff, not a live process-status report. Verify later art
   21regression cases passed; real-data/default/provenance/worker/config checks
   are recorded in real_data.json. This policy/docs update launches no new GPU
   job, training, feature extraction or final evaluation.
+
+### LingBot-Touch on 3DTacDex PaXini: 2026-11-21
+
+- CPU-only path to test frozen LingBot-Touch Tiny on 3DTacDex: adapter
+  `src/openpi/trlt/tacdex_lingbot.py`, CLI `scripts/lingbot_tacdex.py`
+  (inspect/extract/probe), single-hand encode in `lingbot_touch_flax.py`.
+  Contract and approximate (uncalibrated) PaXini geometry: `docs/trlt/lingbot_3dtacdex.md`.
+- Tiny weights pinned under `checkpoints/lingbot_touch/`; openbox features under
+  `datasets/3dtacdex/lingbot_features/openbox/`; execution record and probe results in
+  `experiments/3dtacdex_analysis/lingbot/README.md`. Diagnostic only; no training/GPU run.
+
+### LingBot touch tokens in Stage B (H0-H3): implemented 2026-11-22, not run
+
+- New probe architecture `touch_part_attention` (zero-gated per-finger cross-attention
+  over frozen touch tokens). Old probe configs keep identical serialization/identity.
+  Configs: `configs/trlt/3dtacdex_assembly/lingbot_touch/` (H1 pretrained, H2 random
+  init, H3 raw taxel); H0 is the existing hierarchical config.
+- CPU-only cache builder `scripts/build_touch_tokens.py` (`src/openpi/trlt/touch_tokens.py`);
+  test split requires a Stage B seal. Launcher `scripts/run_lingbot_touch_stage_b.sh`
+  runs one explicit `--stage` per call and checks free GPU memory first.
+- CPU tests only (`touch_tokens_test.py`). No Assembly cache, GPU training or test
+  evaluation has run. Contract in `docs/trlt/lingbot_3dtacdex.md`.

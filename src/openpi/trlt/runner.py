@@ -58,6 +58,25 @@ OBSERVATION_FIELDS = (
     "visual_timestamp",
 )
 PROBE_FIELDS = ("z", "proprioception", "visual_age_seconds", "action_target", "action_valid_mask")
+# Frozen per-finger tactile tokens joined onto latent rows (openpi.trlt.touch_tokens.TouchLatentDataset).
+TOUCH_FIELDS = ("touch_tokens", "touch_valid_mask", "touch_pos_xyz")
+
+
+def probe_fields(config):
+    """Batch fields consumed by a Stage B probe; touch architectures add frozen tactile tokens."""
+    return PROBE_FIELDS + TOUCH_FIELDS if config.architecture == "touch_part_attention" else PROBE_FIELDS
+
+
+def apply_probe(model, config, params, batch, *, train, rngs=None):
+    """Single call site for every probe architecture (train, validation, evaluation, init)."""
+    args = [batch["z"], batch["proprioception"], batch["visual_age_seconds"]]
+    kwargs = {"train": train}
+    if config.architecture == "touch_part_attention":
+        args += [batch["touch_tokens"], batch["touch_valid_mask"]]
+        kwargs["touch_pos_xyz"] = batch["touch_pos_xyz"]
+    if rngs is not None:
+        kwargs["rngs"] = rngs
+    return model.apply({"params": params}, *args, **kwargs)
 
 
 def _progress(message):
@@ -88,6 +107,7 @@ SHARED_PROVENANCE_KEYS = (
     "model_config",
     "model",
     "representation_seed",
+    "touch_identity",
 )
 
 
@@ -426,14 +446,17 @@ def _train(
     stage = "probe" if probe else f"representation/{model_config.mode}"
     _progress(f"{stage}: train={len(train_dataset)} validation={len(validation_dataset)} seed={seed}")
     _progress("Loading initial sample (uncached tactile episodes require CPU video decoding).")
-    fields = PROBE_FIELDS if probe else OBSERVATION_FIELDS
+    fields = probe_fields(config) if probe else OBSERVATION_FIELDS
     first = collate([train_dataset[0]], fields)
     _progress("Initializing model and optimizer on the selected device.")
     if probe:
         model = build_action_probe(config)
-        variables = model.init(
-            jax.random.PRNGKey(seed), first["z"], first["proprioception"], first["visual_age_seconds"], train=False
-        )
+        init_args = [first["z"], first["proprioception"], first["visual_age_seconds"]]
+        init_kwargs = {"train": False}
+        if config.architecture == "touch_part_attention":
+            init_args += [first["touch_tokens"], first["touch_valid_mask"]]
+            init_kwargs["touch_pos_xyz"] = first["touch_pos_xyz"]
+        variables = model.init(jax.random.PRNGKey(seed), *init_args, **init_kwargs)
     else:
         from openpi.models.trlt import build_model
 
@@ -525,14 +548,7 @@ def _train(
 
     def objective(params, batch, denominators, rng):
         if probe:
-            predicted = model.apply(
-                {"params": params},
-                batch["z"],
-                batch["proprioception"],
-                batch["visual_age_seconds"],
-                train=True,
-                rngs={"dropout": rng},
-            )
+            predicted = apply_probe(model, config, params, batch, train=True, rngs={"dropout": rng})
             loss = probe_loss(predicted, batch["action_target"], batch["action_valid_mask"])
             count = jnp.sum(action_element_mask(batch["action_valid_mask"], batch["action_target"]))
             return loss * count / jnp.maximum(denominators[0], 1), {"action_loss": loss, "action_count": count}
@@ -579,9 +595,7 @@ def _train(
     @jax.jit
     def validate(params, batch):
         if probe:
-            predicted = model.apply(
-                {"params": params}, batch["z"], batch["proprioception"], batch["visual_age_seconds"], train=False
-            )
+            predicted = apply_probe(model, config, params, batch, train=False)
             return {"action_loss": probe_loss(predicted, batch["action_target"], batch["action_valid_mask"])}
         return model.apply({"params": params}, batch, train=False)[1]
 
@@ -999,11 +1013,7 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
         if config.architecture == "mlp" and not config.variant_tag
         else (f"{rep_model}__{probe_name}" if rep_model else probe_name)
     )
-    predict = jax.jit(
-        lambda batch: model.apply(
-            {"params": params}, batch["z"], batch["proprioception"], batch["visual_age_seconds"], train=False
-        )
-    )
+    predict = jax.jit(lambda batch: apply_probe(model, config, params, batch, train=False))
     metrics = ActionMetrics(
         normalization["action"]["mean"],
         normalization["action"]["std"],
@@ -1015,7 +1025,7 @@ def evaluate_action_probe(latents, probe_checkpoint, normalization, output_dir, 
     with gzip.open(output / "predictions.jsonl.gz", "wt") as handle:
         for start in range(0, len(latents), batch_size):
             samples = [latents[index] for index in range(start, min(start + batch_size, len(latents)))]
-            batch = collate(samples, PROBE_FIELDS)
+            batch = collate(samples, probe_fields(config))
             prediction = np.asarray(predict(batch))
             metrics.update(
                 prediction,

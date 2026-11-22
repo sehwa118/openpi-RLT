@@ -577,3 +577,63 @@ def encode_bimanual_visuotactile(
         raise ValueError("encode_bimanual_visuotactile requires full [5, P] True coverage_mask")
     coverage_tuple = tuple(tuple(bool(cell) for cell in row) for row in mask_np)
     return _encode_bimanual_jit(params, config, left_signal, right_signal, pos_xyz, coverage_tuple)
+
+
+def load_flax_bundle(bundle_dir: str | Path) -> tuple[LingBotTouchConfig, Any, dict[str, Any]]:
+    """Load a converted bundle (config.json, params.msgpack, manifest.json) and verify its params hash."""
+    import hashlib  # noqa: PLC0415
+
+    from flax import serialization  # noqa: PLC0415
+
+    bundle = Path(bundle_dir)
+    config = LingBotTouchConfig.from_json(bundle / "config.json")
+    raw = (bundle / "params.msgpack").read_bytes()
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    if hashlib.sha256(raw).hexdigest() != manifest.get("params_sha256"):
+        raise ValueError("params.msgpack SHA256 does not match manifest.json")
+    if manifest.get("verified") is not True:
+        raise ValueError("Bundle was converted without PyTorch parity verification")
+    params = serialization.msgpack_restore(raw)
+    return config, params, manifest
+
+
+def init_random_params(config: LingBotTouchConfig, seed: int = 0, taxels: int = 4) -> Any:
+    """Randomly initialized encoder parameters (architecture control, not a pretrained model)."""
+    encoder = LingBotTouchEncoder(config)
+    signal = jnp.zeros((1, config.tubelet_size, 5, taxels, 3), jnp.float32)
+    pos = jnp.zeros((5, taxels, 3), jnp.float32)
+    return encoder.init(jax.random.PRNGKey(seed), signal, pos, np.ones((5, taxels), bool), modality="magnetic")["params"]
+
+
+@functools.partial(jax.jit, static_argnames=("config", "coverage_tuple", "modality"))
+def _encode_hand_jit(
+    params: Any,
+    config: LingBotTouchConfig,
+    signal: jax.Array,
+    pos_xyz: jax.Array,
+    coverage_tuple: tuple[tuple[bool, ...], ...],
+    modality: str,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    out = LingBotTouchEncoder(config).apply({"params": params}, signal, pos_xyz, coverage_tuple, modality=modality)
+    return out.latent, out.address.time_id, out.address.finger_id, out.address.pos_xyz
+
+
+def encode_single_hand(
+    params: Any,
+    config: LingBotTouchConfig,
+    signal: jax.Array,
+    pos_xyz: jax.Array,
+    coverage_mask: Any,
+    *,
+    modality: str,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Encode one canonical-right hand with arbitrary (possibly partial) static coverage.
+
+    Returns (latent [B, N, C], time_id [N], finger_id [N], pos_xyz [B, N, 3]),
+    N = (T / tubelet_size) * coverage_mask.sum(), tokens ordered time-major then finger/taxel.
+    """
+    mask_np = np.asarray(coverage_mask, dtype=bool)
+    if mask_np.ndim != 2 or mask_np.shape[0] != 5 or not mask_np.any():
+        raise ValueError("coverage_mask must be a nonempty boolean [5, M]")
+    coverage_tuple = tuple(tuple(bool(cell) for cell in row) for row in mask_np)
+    return _encode_hand_jit(params, config, signal, pos_xyz, coverage_tuple, modality)

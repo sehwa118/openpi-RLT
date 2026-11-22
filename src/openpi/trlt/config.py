@@ -18,7 +18,8 @@ SENSORS = tuple(
     for finger in ("thumb", "index", "middle", "ring", "pinky")
 )
 MODELS = ("rlt_original", "trlt_self_only", "trlt_cross_only", "trlt_alternating")
-PROBE_ARCHITECTURES = ("mlp", "resmlp", "part_attention")
+PROBE_ARCHITECTURES = ("mlp", "resmlp", "part_attention", "touch_part_attention")
+PROBE_TOUCH_KV_MODES = ("layernorm", "raw_mlp")
 PROBE_ATTENTION_MASK_MODES = ("full", "kinematic", "hierarchical")
 PROBE_LR_SCHEDULES = ("constant", "cosine")
 SCHEMA_VERSION = 1
@@ -178,6 +179,10 @@ class ProbeConfig:
     min_lr_ratio: float = 0.1
     gradient_clip: float = 1.0
     variant_tag: str | None = None
+    # touch_part_attention only: per-finger cross-attention over frozen tactile tokens.
+    touch_num_heads: int = 4
+    touch_use_pos_xyz: bool = True
+    touch_kv_mode: Literal["layernorm", "raw_mlp"] = "layernorm"
 
     def __post_init__(self):
         if min(self.hidden_dim, self.depth, self.action_dim, self.horizon, self.batch_size) <= 0:
@@ -200,13 +205,20 @@ class ProbeConfig:
             raise ValueError("min_lr_ratio must be finite and in [0, 1]")
         if not math.isfinite(self.gradient_clip) or self.gradient_clip <= 0:
             raise ValueError("gradient_clip must be finite and positive")
-        if self.architecture == "part_attention":
+        if self.architecture in ("part_attention", "touch_part_attention"):
             if self.num_heads <= 0 or self.hidden_dim % self.num_heads != 0:
                 raise ValueError("part_attention requires positive num_heads dividing hidden_dim")
             if not math.isfinite(self.mlp_ratio) or self.mlp_ratio <= 0:
                 raise ValueError("part_attention requires positive finite mlp_ratio")
             if self.action_dim not in (58, 22):
                 raise ValueError("part_attention supports 58D T-Rex and 22D OMY+LEAP action dimensions")
+        if self.architecture == "touch_part_attention":
+            if self.touch_num_heads <= 0 or self.hidden_dim % self.touch_num_heads != 0:
+                raise ValueError("touch_num_heads must be positive and divide hidden_dim")
+            if self.touch_kv_mode not in PROBE_TOUCH_KV_MODES:
+                raise ValueError(f"Unknown touch_kv_mode: {self.touch_kv_mode}")
+            if not isinstance(self.touch_use_pos_xyz, bool):
+                raise ValueError("touch_use_pos_xyz must be boolean")
         if self.variant_tag is not None and (
             not isinstance(self.variant_tag, str)
             or "__" in self.variant_tag
@@ -273,14 +285,17 @@ def probe_config_dict(config: ProbeConfig) -> dict:
         value.pop("gradient_clip")
     if config.variant_tag is None:
         value.pop("variant_tag")
+    if config.architecture != "touch_part_attention":
+        for key in ("touch_num_heads", "touch_use_pos_xyz", "touch_kv_mode"):
+            value.pop(key)
     return value
 
 
 def probe_variant_name(config: ProbeConfig) -> str:
     """Return canonical directory/model suffix identifying the Stage B probe variant."""
     base = (
-        f"part_attention_{config.attention_mask_mode}"
-        if config.architecture == "part_attention"
+        f"{config.architecture}_{config.attention_mask_mode}"
+        if config.architecture in ("part_attention", "touch_part_attention")
         else config.architecture
     )
     return f"{base}_{config.variant_tag}" if config.variant_tag else base

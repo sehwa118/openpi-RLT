@@ -241,4 +241,16 @@ def build_action_probe(config: ProbeConfig) -> nn.Module:
         return ResMLPActionProbe(config)
     if config.architecture == "part_attention":
         return PartAttentionActionProbe(config)
+    if config.architecture == "touch_part_attention":
+        from openpi.models.tactile_readout import TouchCrossAttentionConfig
+        from openpi.models.tactile_readout import TouchPartAttentionActionProbe
+
+        return TouchPartAttentionActionProbe(
+            config,
+            TouchCrossAttentionConfig(
+                num_heads=config.touch_num_heads,
+                use_pos_xyz=config.touch_use_pos_xyz,
+                kv_mode=config.touch_kv_mode,
+            ),
+        )
     raise ValueError(f"Unknown probe architecture: {config.architecture}")

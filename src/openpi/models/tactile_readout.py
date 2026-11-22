@@ -22,10 +22,15 @@ class TouchCrossAttentionConfig:
     dropout_rate: float = 0.0
     use_pos_xyz: bool = True
     num_global_queries: int = 8
+    # "layernorm": LN -> Dense on (already normalized) frozen encoder tokens.
+    # "raw_mlp": Dense -> GELU -> Dense without LN, for raw taxel vectors whose magnitude carries force.
+    kv_mode: str = "layernorm"
 
     def __post_init__(self):
         if self.num_heads <= 0 or self.num_global_queries <= 0:
             raise ValueError("num_heads and num_global_queries must be positive")
+        if self.kv_mode not in ("layernorm", "raw_mlp"):
+            raise ValueError("kv_mode must be layernorm or raw_mlp")
         if not math.isfinite(self.dropout_rate) or not (0.0 <= self.dropout_rate < 1.0):
             raise ValueError("dropout_rate must be finite and in [0, 1)")
 
@@ -38,6 +43,7 @@ class PerFingerTouchCrossAttention(nn.Module):
     num_heads: int = 4
     dropout_rate: float = 0.0
     use_pos_xyz: bool = True
+    kv_mode: str = "layernorm"
 
     @nn.compact
     def __call__(
@@ -75,7 +81,13 @@ class PerFingerTouchCrossAttention(nn.Module):
         q_in = q_norm * (1.0 + scale_ca) + shift_ca
 
         touch = jax.lax.stop_gradient(touch_tokens)
-        kv = nn.Dense(self.dim, name="touch_proj")(nn.LayerNorm(name="norm_kv")(touch))
+        if self.kv_mode == "raw_mlp":
+            hidden = nn.gelu(nn.Dense(self.dim, name="touch_raw_fc1")(touch.astype(jnp.float32)), approximate=False)
+            kv = nn.Dense(self.dim, name="touch_proj")(hidden)
+        elif self.kv_mode == "layernorm":
+            kv = nn.Dense(self.dim, name="touch_proj")(nn.LayerNorm(name="norm_kv")(touch.astype(jnp.float32)))
+        else:
+            raise ValueError("kv_mode must be layernorm or raw_mlp")
         if self.use_pos_xyz and touch_pos_xyz is not None:
             pos = jnp.asarray(jax.lax.stop_gradient(touch_pos_xyz), dtype=kv.dtype)
             if pos.ndim == 3:
@@ -219,6 +231,7 @@ class TouchPartAttentionActionProbe(nn.Module):
                 num_heads=self.touch_config.num_heads,
                 dropout_rate=touch_dropout,
                 use_pos_xyz=self.touch_config.use_pos_xyz,
+                kv_mode=self.touch_config.kv_mode,
                 name=f"touch_ca_{index}",
             )(x, cond, touch_tokens, touch_valid_mask, touch_pos_xyz=touch_pos_xyz, train=train)
 
