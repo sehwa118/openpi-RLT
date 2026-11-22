@@ -313,3 +313,19 @@ A8000updates,best7888; Bbest14,last24. Checkpoint parameter hashes, identical
 selection-before-test timing passed. Evidence: rawclip30self4 run
 `results_review.json`. This result review performed no new training/inference/
 evaluation. See the Assembly experiment document for comparisons and limits.
+
+LingBot-Touch-Tiny Assembly implementation (2026-11-22): bounded CPU contracts,
+actual signed/frozen tiny inference, reduced synthetic A/export/B/seal pipeline,
+and an actual-data GPU Stage A1update (train64/validation4, full batch64/micro64)
+are recorded under `experiments/trlt/lingbot_touch_validation/`. See
+[the Assembly LingBot guide](lingbot_touch_assembly.md) for exact command and artifact
+pointers. These are implementation checks; the8k benchmark and final evaluation
+were not launched. Full train/validation cache completion must be read from actual
+cache manifests, not inferred from this note.
+
+
+LingBot-Touch preparation completed on2026-11-22: both branches' implementations,
+complete train/validation frozen tactile caches, actual reader/two-worker equivalence,
+and one actual-data full-shape GPU optimizer check per dataset passed. Master evidence:
+`experiments/trlt/lingbot_touch_validation/ready_to_train.md` and `ready_to_train.json`.
+The new benchmark Stage A/B runs and source test extraction/evaluation remain unrun.

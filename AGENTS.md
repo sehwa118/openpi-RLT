@@ -775,3 +775,45 @@ This is a historical handoff, not a live process-status report. Verify later art
   summary: docs/trlt/3dtacdex_experiments.md. Only seed0,exploratory follow-up.
   Supersedes launch/preflight-only observations; no restart or new evaluation
   was performed during this review.
+
+### LingBot-Touch-Tiny Assembly implementation: 2026-11-22
+
+- New config `configs/trlt/3dtacdex_assembly/lingbot_touch/trlt_self_only_2layer.json`
+  uses frozen Tiny, signed XYZ clip(raw/30,-1,1), all8pads jointly encoded in
+  true4finger slots with30taxels(tip15+pulp15), missingpinky excluded. History3
+  receives encoder-only earliest-prefix duplication to4; taxelmean perpad/tubelet,
+  fixed temporal tau0.20sec then trainable768to512 yields8fusiontactile tokens.
+- Guide `docs/trlt/lingbot_touch_assembly.md`; extraction module
+  `src/openpi/trlt/lingbot_touch.py`, CLI `scripts/cache_tacdex_lingbot.py`, fixed
+  approximate static geometry `configs/trlt/lingbot_touch/paxini_v1.json`.
+- Dedicated torch2.7.1+cu128 extraction environment `.venv-lingbot-touch` is separate
+  from shared training uv/JAX env; source-bootstrap CLIs select this worktree.
+  StageA8000/batch64/micro64/seed0 and StageB defaults are prepared, not launched.
+- CPU evidence `experiments/trlt/lingbot_touch_validation/assembly_pytest.{log,xml}`
+  includes actual frozen signed inference, cache/projection contracts and reduced
+  synthetic A1update/export/B1update/seal check. Actual-data fullshape GPU StageA
+  preflight1update passed on train64/validation4; `assembly_gpu_preflight/report.json`.
+- Cache root `datasets/3dtacdex_assembly/lingbot_touch_cache/paxini_joint_v1/`.
+  Inspect actual manifests for train/validation completion. Test was not extracted
+  or evaluated. New single-variant seal CLI `scripts/seal_tacdex_lingbot.py` protects
+  explicit test access after both best checkpoints exist. Historical seals unchanged.
+
+
+### LingBot training preparation complete: 2026-11-22
+
+- User-authorized multi-agent implementation completed in TRLT and TRLT-3DTacDex;
+  actual readiness: `experiments/trlt/lingbot_touch_validation/ready_to_train.md`
+  and `ready_to_train.json`. Main benchmark training and final test remain unrun.
+- Complete frozen tactile caches: T-Rex35,597train/7,359validation queries under
+  `datasets/trex_squeeze/lingbot_touch_tiny96/`; Assembly14,819train/3,472validation
+  under `datasets/3dtacdex_assembly/lingbot_touch_cache/paxini_joint_v1/`. Reuse them.
+- Both actual reader/2-worker checks exactly matched. Actual-data GPU checks each
+  passed1optimizer update: T-Rexbatch32/micro4 and Assemblybatch64/micro64.
+  These isolated checkpoints are not benchmark runs or resume targets.
+- Shared training env Torchcu126 lacks Blackwellsm120 kernels; separate ignored
+  `.venv-lingbot-touch` uses Torch2.7.1+cu128 for extraction only. Setup script is
+  `scripts/setup_lingbot_extraction_env.sh`; existing JAX training env/auth unchanged.
+- T-Rex source-native left/right identity and PaXini approximate static geometry
+  assumptions are explicit in docs; do not claim calibrated canonical alignment.
+  Adapter content hashes are cache identity: changing adapter source invalidates
+  existing caches; preserve old outputs and inspect provenance before any rebuild.

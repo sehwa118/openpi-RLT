@@ -9,6 +9,9 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def parser():
@@ -53,6 +56,7 @@ def parser():
             command.add_argument("--split-manifest")
             command.add_argument("--normalization")
             command.add_argument("--visual-cache")
+            command.add_argument("--tactile-cache", help="Explicit frozen LingBot tactile cache root")
         if name == "export-latents":
             command.add_argument("--representation-checkpoint", required=True)
             command.add_argument("--split", choices=("train", "validation", "test"), default="train")
@@ -194,6 +198,8 @@ def main(argv=None):
     variant = config.mode if config.geometry_mode == "none" else f"geometry_{config.geometry_mode}/{config.mode}"
     if not config.use_sensor_id_embedding:
         variant = "no_sensor_id/" + variant
+    if config.tactile_encoder == "lingbot_touch":
+        variant = "lingbot_touch/" + variant
     if assembly:
         variant = "3dtacdex_assembly/" + variant
     base = f"checkpoints/trlt/{variant}/seed{args.seed}"
@@ -222,7 +228,7 @@ def main(argv=None):
             if assembly:
                 from openpi.trlt.tacdex_data import AssemblyDataset
 
-                return AssemblyDataset(
+                ds = AssemblyDataset(
                     data_root,
                     args.protocol_dir or raw.get("protocol_dir", "datasets/3dtacdex_assembly/protocol"),
                     split=split,
@@ -230,6 +236,18 @@ def main(argv=None):
                     visual_cache=cache,
                     tactile_preprocessing=tactile_preprocessing,
                 )
+                if config.tactile_encoder == "lingbot_touch":
+                    from openpi.trlt.lingbot_touch import LingbotDataset
+                    from openpi.trlt.lingbot_touch import encoder_identity
+
+                    options = raw.get("lingbot_touch", {})
+                    identity = encoder_identity(
+                        options.get("source", "third_party/lingbot-touch"),
+                        options.get("bundle", "checkpoints/lingbot-touch-tiny"),
+                        options.get("geometry", "configs/trlt/lingbot_touch/paxini_v1.json"),
+                    )
+                    ds = LingbotDataset(ds, args.tactile_cache or options["cache"], identity=identity)
+                return ds
             return TrexDataset(
                 data_root,
                 split_path,

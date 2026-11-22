@@ -47,6 +47,9 @@ def test_true_is_backward_compatible_config_identity_and_false_is_distinct(geome
 
     cfg = ModelConfig(geometry_available=geometry != "none", geometry_mode=geometry)
     old = asdict(cfg)
+    old.pop("tactile_encoder")
+    old.pop("lingbot_feature_dim")
+    old.pop("lingbot_tau_seconds")
     old.pop("use_sensor_id_embedding")
     old.pop("use_modality_embedding")
     old.pop("tactile_format")

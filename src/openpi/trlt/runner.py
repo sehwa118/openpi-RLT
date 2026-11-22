@@ -50,6 +50,10 @@ OBSERVATION_FIELDS = (
     "tactile_timestamps",
     "tactile_positions",
     "geometry_valid_mask",
+    "lingbot_features",
+    "lingbot_valid_mask",
+    "lingbot_timestamps",
+    "lingbot_observation_counts",
     "proprioception",
     "query_timestamp",
     "visual_timestamp",
@@ -64,6 +68,8 @@ def _progress(message):
 
 SHARED_PROVENANCE_KEYS = (
     "geometry_hash",
+    "lingbot_cache_hash",
+    "lingbot_runtime_hash",
     "dataset_kind",
     "tactile_format",
     "revision",
@@ -89,7 +95,7 @@ SHARED_PROVENANCE_KEYS = (
 
 
 def _check_provenance(expected, actual, label):
-    for key in ("geometry_hash", "tactile_preprocessing"):
+    for key in ("geometry_hash", "tactile_preprocessing", "lingbot_cache_hash", "lingbot_runtime_hash"):
         if expected.get(key) != actual.get(key):
             raise ValueError(f"{label} provenance mismatch: {key}")
     for key in SHARED_PROVENANCE_KEYS:
@@ -229,10 +235,21 @@ def assert_gpu():
 def collate(samples, fields):
     if not samples:
         raise ValueError("Empty batch")
-    required = set(fields) - {"spatial_valid_mask", "tactile_positions", "geometry_valid_mask"}
+    required = set(fields) - {
+        "spatial_valid_mask",
+        "tactile_positions",
+        "geometry_valid_mask",
+        "lingbot_features",
+        "lingbot_valid_mask",
+        "lingbot_timestamps",
+        "lingbot_observation_counts",
+    }
     if any(not required.issubset(sample) for sample in samples):
         raise ValueError(f"Missing tensor field(s); expected {sorted(required)}")
     for sample in samples:
+        lingbot = ("lingbot_features", "lingbot_valid_mask", "lingbot_timestamps", "lingbot_observation_counts")
+        if any(k in sample for k in lingbot) and not all(k in sample for k in lingbot):
+            raise ValueError("LingBot features, times, counts and mask must be supplied together")
         if ("tactile_positions" in sample) != ("geometry_valid_mask" in sample):
             raise ValueError("Geometry positions and validity mask must be supplied together")
     output = {}

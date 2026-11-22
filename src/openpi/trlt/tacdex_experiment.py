@@ -101,6 +101,8 @@ def validate_selection_seal(path, *, protocol_dir=None, checkpoint=None):
     if not path:
         raise ValueError("Assembly test access requires --selection-seal after all four models are selected")
     value = read_manifest(path)
+    if value.get("schema") == "lingbot_single_selection_v1":
+        return validate_lingbot_selection_seal(value, protocol_dir=protocol_dir, checkpoint=checkpoint)
     protocol = read_manifest(root_path(protocol_dir or value["protocol_dir"]) / "protocol.json")
     if value["protocol_hash"] != protocol["hash"] or set(value["selections"]) != set(MODELS):
         raise ValueError("Selection seal protocol/models mismatch")
@@ -331,3 +333,82 @@ def write_plan(run_id, *, device="0"):
     )
     write_json(output / "plan.json", result)
     return result
+
+
+def seal_lingbot_selections(representation, probe, output, *, protocol_dir=DEFAULT_PROTOCOL, seed=0):
+    """Seal the explicitly requested single LingBot variant before final test access."""
+    protocol = read_manifest(root_path(protocol_dir) / "protocol.json")
+    records = {}
+    for stage, selected_dir in (("representation", representation), ("probe", probe)):
+        directory = root_path(selected_dir)
+        if directory.name != "best":
+            raise ValueError("Seal validation-selected best checkpoints only")
+        meta = json.loads((directory / "metadata.json").read_text())
+        if meta["stage"] != stage or meta["seed"] != seed:
+            raise ValueError("LingBot selection stage/seed mismatch")
+        for key in ("split_hash", "normalization_hash", "query_manifest_hash"):
+            if meta["provenance"].get(key) != protocol[key]:
+                raise ValueError(f"LingBot selection protocol mismatch: {key}")
+        cfg = meta["model_config"] if stage == "representation" else meta["provenance"]["model_config"]
+        if (
+            cfg.get("tactile_encoder") != "lingbot_touch"
+            or cfg["mode"] != "trlt_self_only"
+            or cfg["num_stages"] != 2
+            or cfg["num_sensors"] != 8
+            or not meta["provenance"].get("lingbot_cache_hash")
+        ):
+            raise ValueError("Expected the Assembly LingBot self-only2layer experiment")
+        if stage == "representation":
+            model_config = cfg
+        elif (
+            cfg != model_config
+            or meta["provenance"].get("representation_checkpoint_hash") != records["representation"]["parameter_hash"]
+        ):
+            raise ValueError("LingBot probe was trained with another representation")
+        if sha256(directory / "params.msgpack") != meta["params_file_hash"]:
+            raise ValueError("LingBot selection params hash mismatch")
+        records[stage] = {
+            "directory": str(directory.resolve()),
+            "metadata_hash": sha256(directory / "metadata.json"),
+            "params_file_hash": meta["params_file_hash"],
+            "parameter_hash": meta["parameter_hash"],
+            "step": meta["step"],
+        }
+    result = seal(
+        {
+            "schema": "lingbot_single_selection_v1",
+            "seed": seed,
+            "protocol_hash": protocol["hash"],
+            "protocol_dir": str(root_path(protocol_dir).resolve()),
+            "model_config": model_config,
+            "selections": {"trlt_self_only": records},
+        }
+    )
+    destination = root_path(output)
+    if destination.exists():
+        if read_manifest(destination) != result:
+            raise ValueError("Existing LingBot seal differs; never overwrite selections")
+    else:
+        write_json(destination, result)
+    return result
+
+
+def validate_lingbot_selection_seal(value, *, protocol_dir=None, checkpoint=None):
+    protocol = read_manifest(root_path(protocol_dir or value["protocol_dir"]) / "protocol.json")
+    if value["protocol_hash"] != protocol["hash"] or set(value["selections"]) != {"trlt_self_only"}:
+        raise ValueError("LingBot selection seal protocol/models mismatch")
+    records = value["selections"]["trlt_self_only"]
+    if set(records) != {"representation", "probe"}:
+        raise ValueError("LingBot requires both selected stages before test access")
+    for record in records.values():
+        directory = root_path(record["directory"])
+        if (
+            sha256(directory / "metadata.json") != record["metadata_hash"]
+            or sha256(directory / "params.msgpack") != record["params_file_hash"]
+        ):
+            raise ValueError("Sealed LingBot checkpoint changed")
+    if checkpoint is not None and str(root_path(checkpoint).resolve()) not in {
+        r["directory"] for r in records.values()
+    }:
+        raise ValueError("Checkpoint is not one of the sealed LingBot selections")
+    return value

@@ -5,6 +5,11 @@ Always supply one of configs/trlt/3dtacdex_assembly/*.json.
 """
 
 import json
+from pathlib import Path
+import sys
+
+# Shared editable env may point at another worktree: always import this checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from trex_offline import main
 from trex_offline import parser

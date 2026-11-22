@@ -168,6 +168,24 @@ def relative_times(batch: Batch):
     return jnp.where(valid, ts - batch["query_timestamp"][:, None, None], 0.0)
 
 
+def lingbot_temporal_pool(batch: Batch, tau: float):
+    """Masked fixed exponential readout over cached tubelet features."""
+    features = jax.lax.stop_gradient(batch["lingbot_features"])
+    valid = batch["lingbot_valid_mask"].astype(bool)
+    timestamps = batch["lingbot_timestamps"]
+    query = batch["query_timestamp"][:, None, None]
+    # Host cache adapter validates real future times; masking also protects padding.
+    valid = valid & jnp.isfinite(timestamps) & (timestamps <= query + 1e-5)
+    valid = valid & (batch["lingbot_observation_counts"] > 0)
+    logits = jnp.where(valid, (timestamps - query) / tau, -1e30)
+    weight = jax.nn.softmax(logits, axis=1)
+    weight = jnp.where(valid, weight, 0.0)
+    weight = weight / jnp.maximum(weight.sum(axis=1, keepdims=True), 1e-20)
+    pooled = jnp.sum(jnp.where(valid[..., None], features, 0.0) * weight[..., None], axis=1)
+    relative = jnp.sum(jnp.where(valid, timestamps - query, 0.0) * weight, axis=1)
+    return pooled, jnp.any(valid, axis=1), relative
+
+
 class TRLTEncoder(nn.Module):
     config: ModelConfig
 
@@ -191,7 +209,13 @@ class TRLTEncoder(nn.Module):
             modality = jnp.zeros((3, cfg.embed_dim), visual.dtype)
         visual = visual + modality[0]
         frame_valid, pixel_valid = tactile_masks(batch)
-        if cfg.tactile_format == "taxels":
+        if cfg.tactile_encoder == "lingbot_touch":
+            cached, sensor_valid, sensor_relative = lingbot_temporal_pool(batch, cfg.lingbot_tau_seconds)
+            if cached.shape[1:] != (cfg.num_sensors, cfg.lingbot_feature_dim):
+                raise ValueError("LingBot sensor/feature shape differs from model config")
+            tactile = nn.Dense(cfg.embed_dim, name="lingbot_projection")(cached)[:, None]
+            frame_valid = sensor_valid[:, None]
+        elif cfg.tactile_format == "taxels":
             tactile = TactileTaxelEncoder(cfg, name="tactile_taxels")(batch["tactile"], pixel_valid)
         else:
             tactile = TactileCNN(cfg, name="tactile_cnn")(batch["tactile"], pixel_valid)
@@ -203,7 +227,11 @@ class TRLTEncoder(nn.Module):
         else:
             # Ablate encoder identity only; decoder sensor queries define output slots.
             sensor = jnp.zeros((cfg.num_sensors, cfg.embed_dim), tactile.dtype)
-        relative = relative_times(batch)[..., None]
+        relative = (
+            sensor_relative[:, None, :, None]
+            if cfg.tactile_encoder == "lingbot_touch"
+            else relative_times(batch)[..., None]
+        )
         time = nn.Dense(cfg.embed_dim, name="time_in")(relative)
         time = nn.Dense(cfg.embed_dim, name="time_out")(nn.gelu(time))
         tactile = tactile + sensor[None, None] + modality[1] + time

@@ -626,3 +626,10 @@ Assembly tactile의 현재 기본 전처리는 **clip(raw/30,-1,1)**이며 tacti
 경로는 제거했다(state/action 표준화 유지). Self-only2layers rawclip30 결과는
 주 MSE0.059127821로 기존 self2 대비27.18% 감소했으며 RLT와의 우열은 불확실하다.
 [통합 결과·정규화 정책·실행 근거](3dtacdex_experiments.md#rawclip30-완료-결과-및-tactile-전처리-기본-정책-2026-11-20-확인)를 참조한다.
+
+## Frozen LingBot-Touch-Tiny Assembly extension (2026-11-22)
+
+[Implementation, cache contract and explicit Stage A/B commands](lingbot_touch_assembly.md)
+for the new signed-rawclip30 joint-eight-pad self-only2layer experiment. Existing
+scratch encoders remain the default. Source/weights and per-query tactile caches
+are pinned; all final test access still requires validation-selection sealing.

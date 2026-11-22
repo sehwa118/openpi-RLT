@@ -69,6 +69,9 @@ class ModelConfig:
     use_modality_embedding: bool = True
     use_sensor_id_embedding: bool = True
     num_sensors: int = 10
+    tactile_encoder: Literal["scratch", "lingbot_touch"] = "scratch"
+    lingbot_feature_dim: int = 768
+    lingbot_tau_seconds: float = 0.20
     tactile_format: Literal["image", "taxels"] = "image"
     num_taxels: int = 15
     tactile_channels: int = 1
@@ -108,6 +111,16 @@ class ModelConfig:
             <= 0
         ):
             raise ValueError("Model dimensions and layer counts must be positive")
+        if self.tactile_encoder not in ("scratch", "lingbot_touch"):
+            raise ValueError("Unknown tactile encoder")
+        if self.tactile_encoder == "lingbot_touch" and (
+            self.mode == "rlt_original"
+            or self.geometry_mode != "none"
+            or self.lingbot_feature_dim != 768
+            or not math.isfinite(self.lingbot_tau_seconds)
+            or self.lingbot_tau_seconds <= 0
+        ):
+            raise ValueError("LingBot requires TRLT, disabled geometry, feature768 and positive finite tau")
         if self.tactile_format not in ("image", "taxels") or self.num_taxels <= 0:
             raise ValueError("Invalid tactile format/taxel count")
         if self.tactile_format == "taxels" and (self.tactile_channels != 3 or self.geometry_mode != "none"):
@@ -187,6 +200,9 @@ def config_dict(config):
 def model_config_dict(config):
     """Keep disabled-geometry checkpoint identity compatible with pre-geometry runs."""
     value = asdict(config)
+    if config.tactile_encoder == "scratch":
+        for key in ("tactile_encoder", "lingbot_feature_dim", "lingbot_tau_seconds"):
+            value.pop(key)
     if config.tactile_format == "image":
         value.pop("tactile_format")
         value.pop("num_taxels")
