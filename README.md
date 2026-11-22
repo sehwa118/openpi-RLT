@@ -67,6 +67,12 @@ uv sync
 uv pip install -e .
 ```
 
+For standard pi0.5 fine-tuning on the local two-camera 3DTacDex dataset, including
+50-episode selection, full/LoRA CLI configs, profiling, and recorded-observation inference,
+see [the baseline training guide](docs/pi05_tacdex_baseline.md).
+For the video-loading bottleneck diagnosis, encoding fix, and CPU validation results,
+see [the data loading incident report (Korean)](docs/data_loading_bottleneck.md).
+
 RLT training configs are registered in
 [`src/openpi/training/config.py`](src/openpi/training/config.py). A typical
 stage-1 command looks like:

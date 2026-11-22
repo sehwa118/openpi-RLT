@@ -1,7 +1,10 @@
 import dataclasses
 import functools
+import json
 import logging
+import pathlib
 import platform
+import time
 from typing import Any
 
 import etils.epath as epath
@@ -52,17 +55,20 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
         wandb.init(mode="disabled")
         return
 
+    if config.wandb_dir is not None:
+        pathlib.Path(config.wandb_dir).mkdir(parents=True, exist_ok=True)
+    wandb_kwargs = {"project": config.project_name, "entity": config.wandb_entity, "dir": config.wandb_dir}
     ckpt_dir = config.checkpoint_dir
     if not ckpt_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory {ckpt_dir} does not exist.")
     if resuming:
         run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
-        wandb.init(id=run_id, resume="must", project=config.project_name)
+        wandb.init(id=run_id, resume="must", **wandb_kwargs)
     else:
         wandb.init(
             name=config.exp_name,
             config=dataclasses.asdict(config),
-            project=config.project_name,
+            **wandb_kwargs,
         )
         (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
 
@@ -193,6 +199,8 @@ def train_step(
 
 def main(config: _config.TrainConfig):
     init_logging()
+    run_start = time.perf_counter()
+    profile_steps = []
     logging.info(f"Running on: {platform.node()}")
 
     if config.batch_size % jax.device_count() != 0:
@@ -222,8 +230,11 @@ def main(config: _config.TrainConfig):
         sharding=data_sharding,
         shuffle=True,
     )
+    initial_data_start = time.perf_counter()
     data_iter = iter(data_loader)
     batch = next(data_iter)
+    initial_data_wait_seconds = time.perf_counter() - initial_data_start
+    logging.info("First batch ready in %.3f seconds", initial_data_wait_seconds)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
 
     # Log images from first batch to sanity check.
@@ -257,8 +268,14 @@ def main(config: _config.TrainConfig):
 
     infos = []
     for step in pbar:
+        step_start = time.perf_counter()
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
+        if config.profile_dir is not None:
+            jax.block_until_ready((train_state, info))
+            profile_steps.append(
+                {"step": step, "seconds": time.perf_counter() - step_start, "loss": float(info["loss"])}
+            )
         infos.append(info)
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
@@ -267,13 +284,37 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
+        data_wait_start = time.perf_counter()
         batch = next(data_iter)
+        if config.profile_dir is not None:
+            profile_steps[-1]["data_wait_seconds"] = time.perf_counter() - data_wait_start
+            if step % config.log_interval == 0:
+                logging.info("Data wait after step %d: %.3f seconds", step, profile_steps[-1]["data_wait_seconds"])
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
+    if config.profile_dir is not None:
+        profile_path = pathlib.Path(config.profile_dir)
+        if not profile_path.is_absolute():
+            profile_path = pathlib.Path(__file__).resolve().parents[1] / profile_path
+        profile_path.mkdir(parents=True, exist_ok=True)
+        report = {
+            "config": config.name,
+            "batch_size": config.batch_size,
+            "total_seconds": time.perf_counter() - run_start,
+            "initial_data_wait_seconds": initial_data_wait_seconds,
+            "steps": profile_steps,
+            "device_memory": [d.memory_stats() for d in jax.local_devices()],
+            "note": (
+                "First step includes compilation; seconds measures synchronized training. "
+                "data_wait_seconds measures fetching the next batch, including host-to-device submission; "
+                "checkpoint writes are excluded from both."
+            ),
+        }
+        (profile_path / "training_profile.json").write_text(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":

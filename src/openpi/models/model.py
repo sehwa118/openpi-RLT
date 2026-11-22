@@ -94,6 +94,9 @@ class Observation(Generic[ArrayT]):
     # Low-dimensional robot state.
     state: at.Float[ArrayT, "*b s"]
 
+    # Optional supervision mask; never used as a policy input.
+    action_loss_mask: at.Bool[ArrayT, "*b ah ad"] | None = None
+
     # Tokenized prompt.
     tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
     # Tokenized prompt mask.
@@ -122,6 +125,7 @@ class Observation(Generic[ArrayT]):
             images=data["image"],
             image_masks=data["image_mask"],
             state=data["state"],
+            action_loss_mask=data.get("action_loss_mask"),
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
@@ -201,6 +205,7 @@ def preprocess_observation(
         images=out_images,
         image_masks=out_masks,
         state=observation.state,
+        action_loss_mask=observation.action_loss_mask,
         tokenized_prompt=observation.tokenized_prompt,
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
         token_ar_mask=observation.token_ar_mask,

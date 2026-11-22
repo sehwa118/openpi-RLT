@@ -24,6 +24,7 @@ import openpi.policies.agilexbag_image_policy as agilexbag_image_policy
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.tacdex_policy as tacdex_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -72,6 +73,9 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    local_root: str | None = None
+    episodes: tuple[int, ...] | None = None
+    video_backend: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -538,11 +542,52 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotTacdexDataConfig(DataConfigFactory):
+    """Two external RGB views and absolute 6 arm + 16 LEAP source joints."""
+
+    repo_id: str = "local/3dtacdex_assembly"
+    local_root: str = str(pathlib.Path(__file__).resolve().parents[3] / "datasets/3dtacdex_assembly/lerobot_default")
+    num_episodes: int = 50
+
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if self.num_episodes < 1:
+            raise ValueError("num_episodes must be positive")
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            local_root=str(_REPO_ROOT / self.local_root),
+            episodes=tuple(range(self.num_episodes)),
+            video_backend="pyav",
+            action_sequence_keys=("action", "action_valid_mask"),
+            prompt_from_task=True,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "state": "observation.state",
+                            "main": "observation.images.main",
+                            "secondary": "observation.images.secondary",
+                            "actions": "action",
+                            "action_valid_mask": "action_valid_mask",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[tacdex_policy.TacdexInputs()], outputs=[tacdex_policy.TacdexOutputs()]
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
     name: tyro.conf.Suppress[str]
     # Project name.
     project_name: str = "openpi"
+    wandb_entity: str | None = None
+    wandb_dir: str | None = None
     # Experiment name. Will be used to name the metadata and checkpoint directories.
     exp_name: str = tyro.MISSING
 
@@ -584,6 +629,9 @@ class TrainConfig:
     num_workers: int = 2
     # Number of train steps (batches) to run.
     num_train_steps: int = 30_000
+
+    # Synchronize each step and write timing/device-memory metrics when set.
+    profile_dir: str | None = None
 
     # How often (in steps) to log training metrics.
     log_interval: int = 100
@@ -638,8 +686,40 @@ class TrainConfig:
             raise ValueError("Cannot resume and overwrite at the same time.")
 
 
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _tacdex_config(*, lora: bool) -> TrainConfig:
+    model = pi0_config.Pi0Config(
+        pi05=True,
+        image_keys=("base_0_rgb", "left_wrist_0_rgb"),
+        paligemma_variant="gemma_2b_lora" if lora else "gemma_2b",
+        action_expert_variant="gemma_300m_lora" if lora else "gemma_300m",
+    )
+    return TrainConfig(
+        name="pi05_tacdex_lora" if lora else "pi05_tacdex",
+        model=model,
+        data=LeRobotTacdexDataConfig(assets=AssetsConfig(asset_id="tacdex_50")),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            str(_REPO_ROOT / "checkpoints/openpi-assets/checkpoints/pi05_base/params")
+        ),
+        freeze_filter=model.get_freeze_filter(),
+        ema_decay=None,
+        assets_base_dir=str(_REPO_ROOT / "experiments/pi05_tacdex/assets"),
+        checkpoint_base_dir=str(_REPO_ROOT / "checkpoints"),
+        batch_size=1,
+        num_workers=2,
+        wandb_enabled=True,
+        project_name="trlt",
+        wandb_entity="rnsrns118-seoul-national-university",
+        wandb_dir=str(_REPO_ROOT / "experiments/pi05_tacdex/wandb"),
+    )
+
+
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    _tacdex_config(lora=False),
+    _tacdex_config(lora=True),
     #
     # Inference Aloha configs.
     #
