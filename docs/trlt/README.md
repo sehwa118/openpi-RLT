@@ -597,3 +597,9 @@ LingBot-Touch 후속 구현과 T-Rex 학습 명령은 [사용 안내](lingbot_to
 CPU 회귀·축소 A/B 및 실제 GPU/cache 준비 증거는
 `experiments/trlt/lingbot_touch_validation/`에 별도로 기록한다. 이 경로의
 실제 완료 보고서가 최초 계획 문서의 구현 전 상태보다 우선한다.
+
+
+## LingBot-Touch completed results (2026-11-23)
+
+[두 데이터셋 결과·기존 encoder 비교·불확실성 정리](lingbot_touch_results.md)를 참조한다.
+두 데이터셋 모두 seed0에서19단계 학습/평가를 완료했다.

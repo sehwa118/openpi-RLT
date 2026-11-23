@@ -387,3 +387,70 @@ This is a historical handoff, not a live process-status report. Verify later art
   assumptions are explicit in docs; do not claim calibrated canonical alignment.
   Adapter content hashes are cache identity: changing adapter source invalidates
   existing caches; preserve old outputs and inspect provenance before any rebuild.
+
+
+### User-authorized LingBot sequential experiment: 2026-11-22
+
+- User explicitly requested T-Rex complete training/evaluation first, then
+  3DTac-Dex complete training/evaluation, and selected online W&B in the existing
+  approved `rnsrns118-seoul-national-university/trlt` project. Only seed0.
+- Run `lingbot_sequential_seed0_20261122T140539Z` under `experiments/trlt/runs/`; active lookup:
+  `experiments/trlt/lingbot_active_run.json` (also active_run.json).
+  Tmux socket `trlt-runs`, session `lingbot-seq-seed0-20261122T140539Z`, train/reports windows.
+- Explicit19-stage queue: T-Rex A15k/batch32/micro4, train/validation export,
+  Bdefaults, sealA/B selections, testtactile extraction, testexport/evaluation/report;
+  only then Assembly A8k/batch64/micro64 and corresponding pipeline/report.
+  Four main training runs enable online W&B. Existing visual and train/validation
+  tactile caches are reused. Checkpoints/latents/logs use isolated new run paths.
+- At launch observation 2026-11-22T14:11:30.968446+00:00, orchestrator was alive and
+  WAITING_GPU before T-Rex Stage A because another process occupiedGPU0.
+  No optimizer update or W&B run had started at this observation. It automatically
+  waits for an idleGPU; this is historical launch evidence, not live status.
+- Inspect status.json, events.log, heartbeat.json, current_process.json, stage_logs,
+  actual checkpoints and live processes before reporting progress or recovering.
+  Source/config/input changes or stage failures stop the queue; no automatic
+  retry/resume. Do not duplicate/restart based on this launch record. selections
+  are sealed before test; T-Rex final report must pass before Assembly begins.
+
+
+### LingBot queue stopped by user: 2026-11-22T14:13:46.345366+00:00
+
+- User requested stopping the queue and waiting. Run `lingbot_sequential_seed0_20261122T140539Z`
+  is STOPPED_BY_USER; orchestrator and its tmux session were removed.
+  At stop it was WAITING_GPU before T-Rex Stage A; training child created: False.
+- Do not automatically restart/resume or launch another experiment. Wait for a
+  new user instruction. Evidence: run `user_stop.json`, status.json and events.log.
+
+
+### LingBot experiment restarted by explicit user request: 2026-11-22T23:10:31.728777+00:00
+
+- User explicitly requested training/evaluation again after GPU became idle.
+  This supersedes the earlier stop for a new execution. Run `lingbot_sequential_seed0_20261122T230902Z`
+  replaces stopped `lingbot_sequential_seed0_20261122T140539Z`; old stop/log evidence retained.
+- Active lookup: `experiments/trlt/lingbot_active_run.json` (also active_run.json).
+  Tmux socket `trlt-runs`, session `lingbot-seq-seed0-20261122T230902Z`, train/reports windows.
+  Same19-stage T-Rex→Assembly seed0 sequence, online approved W&B, no --resume.
+- Source/config/input hashes match the prepared experiment. Old queue had no
+  training child/checkpoints; new T-Rex Stage A actually initialized on GPU0
+  fromstep0 with max15000, batch32/micro4. W&B run: `uc6fj9e5`.
+  This launch record is not evidence of later step counts/completion.
+- Inspect current status/events/heartbeat, training JSONL, saved last/best metadata
+  and live processes before reporting progress or recovery. A failing stage or
+  source/input change stops the queue. Do not duplicate/restart automatically.
+
+
+### LingBot experiment completed: verified2026-11-23
+
+- Run `lingbot_sequential_seed0_20261122T230902Z` completed all19stages at07:27:39UTC,
+  T-Rex final report before Assembly launch. Do not restart or duplicate.
+- Final seed0 primary normalized macroMSE:T-Rex0.065025158(26episodes),
+  Assembly0.056652760(16originaltrajectories). StageA reached15000/8000updates;
+  selectedA steps7791/8000, selectedB epochs24/17.
+- Matched self-only CNN/MLP rawclip30 baselines:0.068767073/0.059127821,
+  observed reductions5.44%/4.19%. Both paired episode/trajectory-bootstrap95%
+  intervals include0; training-seed variability unmeasured. Token/readout/frozen
+  conditions also changed; do not claim an isolated encoder effect or online success.
+- Summary: `docs/trlt/lingbot_touch_results.md`; actual evidence: run final_report.md,
+  summary.json, per-dataset evaluation metrics and review/comparison.json.
+  Test tactile caches now completed; supersedes test-not-extracted launch records.
+  Results summary used CPU only; no new training/extraction/evaluation.

@@ -136,3 +136,10 @@ complete train/validation frozen tactile caches, actual reader/two-worker equiva
 and one actual-data full-shape GPU optimizer check per dataset passed. Master evidence:
 `experiments/trlt/lingbot_touch_validation/ready_to_train.md` and `ready_to_train.json`.
 The new benchmark Stage A/B runs and source test extraction/evaluation remain unrun.
+
+
+LingBot sequential run `lingbot_sequential_seed0_20261122T230902Z` completed all19stages at2026-11-23T07:27:39Z.
+Both final source test evaluations completed after checkpoint sealing. Review validation of
+checkpoint file hashes, equal baseline provenance/test IDs/counts and100,000paired bootstrap:
+`experiments/trlt/runs/lingbot_sequential_seed0_20261122T230902Z/review/comparison.json`.
+No training/extraction/evaluation was rerun for this summary.
