@@ -18,13 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-VARIANTS = {
-    "b0": "part_attention_hierarchical_drop01",
-    "m1": "touch_part_attention_hierarchical_tgru_m1",
-    "m5": "touch_part_attention_hierarchical_tgru_m5",
-    "m5s": "touch_part_attention_hierarchical_tgru_m5s",
-    "g5": "touch_part_attention_hierarchical_tgru_g5",
-}
+DEFAULT_VARIANTS = ("b0", "m1", "m5", "m5s", "g5")
 PAIRS = (
     ("g5", "m5"),
     ("g5", "m5s"),
@@ -48,15 +42,28 @@ GROUPS = {
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--logs", required=True, type=Path, help="Launcher <out-root>/logs")
+    p.add_argument("--logs", required=True, type=Path, nargs="+", help="Launcher <out-root>/logs (one or more)")
     p.add_argument("--normalization", required=True, type=Path)
     p.add_argument("--contact-definition", required=True, type=Path)
     p.add_argument("--test-touch", required=True, type=Path, help="raw_t5 test cache (contact-change selection)")
     p.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
-    p.add_argument("--variants", nargs="+", default=list(VARIANTS))
+    p.add_argument("--variants", nargs="+", default=list(DEFAULT_VARIANTS))
+    p.add_argument("--pairs", nargs="+", help="A:B differences (default: the original M/G-vs-B0 set)")
     p.add_argument("--bootstrap-samples", type=int, default=10000)
     p.add_argument("--output", required=True, type=Path)
     return p
+
+
+def variant_name(v: str) -> str:
+    return "part_attention_hierarchical_drop01" if v == "b0" else f"touch_part_attention_hierarchical_tgru_{v}"
+
+
+def eval_dir(roots: list[Path], seed: int, v: str) -> Path:
+    found = [r / f"seed{seed}" / f"eval_{variant_name(v)}" for r in roots]
+    found = [d for d in found if (d / "metrics.json").exists()]
+    if len(found) != 1:
+        raise FileNotFoundError(f"{v} seed{seed}: expected exactly one evaluation under {roots}, found {found}")
+    return found[0]
 
 
 def contact_keys(test_touch: Path, threshold: float) -> set[tuple[int, int]]:
@@ -133,7 +140,7 @@ def main(argv=None):
     runs, traj = {}, {}
     for v in args.variants:
         for s in args.seeds:
-            path = args.logs / f"seed{s}" / f"eval_{VARIANTS[v]}" / "predictions.jsonl.gz"
+            path = eval_dir(args.logs, s, v) / "predictions.jsonl.gz"
             runs[(v, s)], traj[(v, s)] = metrics_for(path, std, contact)
             reference = json.loads((path.parent / "metrics.json").read_text())["metrics"]
             got, want = runs[(v, s)]["all_trajectory_macro"], reference["primary_normalized_episode_macro_mse"]
@@ -151,8 +158,11 @@ def main(argv=None):
                 "std_ddof1": float(vals.std(ddof=1)),
             }
     pairs = {}
-    for a, b in PAIRS:
+    pair_list = [tuple(x.split(":")) for x in args.pairs] if args.pairs else PAIRS
+    for a, b in pair_list:
         if a not in args.variants or b not in args.variants:
+            if args.pairs:
+                raise ValueError(f"pair {a}:{b} needs both variants in --variants")
             continue
         entry = {}
         for metric in ("all", "first_action", "hand", "arm", "contact_change"):
@@ -195,7 +205,7 @@ def main(argv=None):
     for name, entry in pairs.items():
         e = entry["all"]
         print(
-            f"{name:12s} Δprimary {e['mean']:+.6f} CI[{e['ci95'][0]:+.6f},{e['ci95'][1]:+.6f}] seeds↓{e['seeds_improved']}/3"
+            f"{name:14s} Δprimary {e['mean']:+.6f} CI[{e['ci95'][0]:+.6f},{e['ci95'][1]:+.6f}] seeds↓{e['seeds_improved']}/3"
         )
     return 0
 

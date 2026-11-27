@@ -6,6 +6,8 @@
 #   m5   + 5-frame concatenated xyz -> MLP                 (probe_tgru_m5.json,  raw T=5 cache)
 #   m5s  + 5-frame xyz -> capacity-matched MLP (width 53)  (probe_tgru_m5s.json, raw T=5 cache)
 #   g5   + 5-frame xyz -> shared GRU(32), last hidden      (probe_tgru_g5.json,  raw T=5 cache)
+#   m10 m10s g10 m20 m20s g20: same encoders with 10/20-frame history (long-history follow-up,
+#        docs/trlt/assembly_tactile_gru_long_history_plan.md; capacity-matched widths 48 / 40)
 #
 # Stages (run in this order; none starts another):
 #   caches       CPU  train/validation raw touch caches (T=1 and/or T=5, only those needed)
@@ -47,7 +49,7 @@ MAX_STEPS=""
 DRY_RUN=0
 
 usage() {
-  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 Required:
@@ -149,12 +151,12 @@ TG_DIR="${REPO_ROOT}/configs/trlt/3dtacdex_assembly/tactile_gru"
 config_for() {
   case "$1" in
     b0) echo "${AA_DIR}/probe_part_attn_hierarchical_drop01.json" ;;
-    m1|m5|m5s|g5) echo "${TG_DIR}/probe_tgru_$1.json" ;;
-    *) echo "Error: unknown variant '$1' (use b0 m1 m5 m5s g5)." >&2; return 1 ;;
+    m1|m5|m5s|g5|m10|m10s|g10|m20|m20s|g20) echo "${TG_DIR}/probe_tgru_$1.json" ;;
+    *) echo "Error: unknown variant '$1' (use b0 m1 m5 m5s g5 m10 m10s g10 m20 m20s g20)." >&2; return 1 ;;
   esac
 }
 frames_for() {  # raw touch history frames; empty for b0
-  case "$1" in m1) echo 1 ;; m5|m5s|g5) echo 5 ;; *) echo "" ;; esac
+  case "$1" in m1) echo 1 ;; m5|m5s|g5) echo 5 ;; m10|m10s|g10) echo 10 ;; m20|m20s|g20) echo 20 ;; *) echo "" ;; esac
 }
 name_for() {  # probe_variant_name (checkpoint/log directory suffix)
   case "$1" in

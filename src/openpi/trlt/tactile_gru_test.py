@@ -42,6 +42,15 @@ CONDITIONS = {  # name -> (config file, raw frames)
     "M5s": ("tactile_gru/probe_tgru_m5s.json", 5),
     "G5": ("tactile_gru/probe_tgru_g5.json", 5),
 }
+LONG_CONDITIONS = {  # long-history follow-up (docs/trlt/assembly_tactile_gru_long_history_plan.md)
+    "M10": ("tactile_gru/probe_tgru_m10.json", 10),
+    "M10s": ("tactile_gru/probe_tgru_m10s.json", 10),
+    "G10": ("tactile_gru/probe_tgru_g10.json", 10),
+    "M20": ("tactile_gru/probe_tgru_m20.json", 20),
+    "M20s": ("tactile_gru/probe_tgru_m20s.json", 20),
+    "G20": ("tactile_gru/probe_tgru_g20.json", 20),
+}
+ALL_CONDITIONS = {**CONDITIONS, **LONG_CONDITIONS}
 B0_CONFIG = "attention_actor/probe_part_attn_hierarchical_drop01.json"
 H3_CONFIG = "lingbot_touch/probe_touch_raw_taxel.json"
 B0_JIWOO = Path(
@@ -97,7 +106,7 @@ def _open_gates(params, value=0.5):
 
 def test_new_configs_differ_from_b0_only_in_touch_fields():
     b0 = _raw(B0_CONFIG)
-    for name, (path, frames) in CONDITIONS.items():
+    for name, (path, frames) in ALL_CONDITIONS.items():
         raw = _raw(path)
         for key in ("model", "temporal", "representation", "protocol_dir", "tactile_preprocessing", "split_seed"):
             assert raw[key] == b0[key], (name, key)
@@ -110,8 +119,8 @@ def test_new_configs_differ_from_b0_only_in_touch_fields():
         assert (cfg.hidden_dim, cfg.depth, cfg.num_heads, cfg.dropout_rate) == (128, 2, 4, 0.1)
         assert (cfg.attention_mask_mode, cfg.horizon, cfg.action_dim) == ("hierarchical", 3, 22)
         assert cfg.touch_raw_frames == frames
-    names = {probe_variant_name(_probe(path)) for path, _ in CONDITIONS.values()}
-    assert len(names) == 4
+    names = {probe_variant_name(_probe(path)) for path, _ in ALL_CONDITIONS.values()}
+    assert len(names) == len(ALL_CONDITIONS)
     assert all(n.startswith("touch_part_attention_hierarchical_tgru_") for n in names)
 
 
@@ -159,7 +168,7 @@ def test_invalid_touch_encoder_configs_rejected(kwargs):
 def test_parameter_counts():
     rng = np.random.default_rng(0)
     counts = {}
-    for name, (path, frames) in {"B0": (B0_CONFIG, 0), **CONDITIONS}.items():
+    for name, (path, frames) in {"B0": (B0_CONFIG, 0), **ALL_CONDITIONS}.items():
         _, params, _ = _init(_probe(path), _inputs(rng, 2, frames))
         touch = {k: v for k, v in params.items() if k.startswith("touch_ca_")}
         enc = sum(
@@ -176,11 +185,21 @@ def test_parameter_counts():
         )
     assert counts["B0"] == (721602, 0, 0)  # equals the reused B0 manifests' parameter_count
     # Shared cross-attention parts are identical; only the encoder differs.
-    for name in CONDITIONS:
+    for name in ALL_CONDITIONS:
         assert counts[name][1] - counts[name][2] == counts["M5"][1] - counts["M5"][2]
-    # Capacity-matched MLP control is within 1% of the GRU encoder.
-    assert abs(counts["M5s"][2] - counts["G5"][2]) / counts["G5"][2] < 0.01
-    assert counts["M5"][2] / counts["G5"][2] > 2
+    # Capacity-matched MLP controls are within 1% of the GRU encoder (GRU size does not depend on T).
+    for t in (5, 10, 20):
+        assert counts[f"G{t}"] == counts["G5"]
+        assert abs(counts[f"M{t}s"][2] - counts[f"G{t}"][2]) / counts[f"G{t}"][2] < 0.01
+        assert counts[f"M{t}"][2] / counts[f"G{t}"][2] > 2
+    assert {n: counts[n] for n in LONG_CONDITIONS} == {
+        "M10": (994754, 273152, 40960),
+        "M10s": (969314, 247712, 15520),
+        "G10": (969218, 247616, 15424),
+        "M20": (1002434, 280832, 48640),
+        "M20s": (969170, 247568, 15376),
+        "G20": (969218, 247616, 15424),
+    }
 
 
 # --------------------------------------------------------------------------- GRU semantics
@@ -227,10 +246,12 @@ def test_raw_gru_is_shared_time_ordered_and_window_local():
 
 def test_raw_frames_guard_rejects_cache_config_mismatch():
     rng = np.random.default_rng(0)
-    for name in ("M5", "G5", "M5s"):
-        cfg = _probe(CONDITIONS[name][0])
+    for name in ("M5", "G5", "M5s", "M10", "G20"):
+        cfg = _probe(ALL_CONDITIONS[name][0])
         with pytest.raises(ValueError, match="raw_frames"):
-            _init(cfg, _inputs(rng, 2, 1))  # 1-frame tokens into a 5-frame condition
+            _init(cfg, _inputs(rng, 2, 1))  # 1-frame tokens into a multi-frame condition
+    with pytest.raises(ValueError, match="raw_frames"):
+        _init(_probe(ALL_CONDITIONS["G10"][0]), _inputs(rng, 2, 20))  # 20-frame cache into a 10-frame model
     with pytest.raises(ValueError, match="raw_frames"):
         _init(_probe(CONDITIONS["M1"][0]), _inputs(rng, 2, 5))
 
@@ -242,7 +263,7 @@ def test_touch_conditions_start_as_b0_function():
     args0 = _inputs(rng, 4, 0)
     p0 = PartAttentionActionProbe(b0cfg).init(jax.random.PRNGKey(0), *args0)["params"]
     out0 = PartAttentionActionProbe(b0cfg).apply({"params": p0}, *args0)
-    for name, (path, frames) in CONDITIONS.items():
+    for name, (path, frames) in ALL_CONDITIONS.items():
         touch = list(_inputs(np.random.default_rng(3), 4, frames)[3:])
         model, p1, kw = _init(_probe(path), [*args0, *touch])
         shared = {k: v for k, v in p1.items() if not k.startswith("touch_ca_")}
@@ -251,9 +272,9 @@ def test_touch_conditions_start_as_b0_function():
         np.testing.assert_allclose(np.asarray(out1), np.asarray(out0), rtol=1e-6, atol=1e-6)
 
 
-@pytest.mark.parametrize("name", list(CONDITIONS))
+@pytest.mark.parametrize("name", list(ALL_CONDITIONS))
 def test_gradients_reach_trainable_encoder_but_not_frozen_inputs(name):
-    path, frames = CONDITIONS[name]
+    path, frames = ALL_CONDITIONS[name]
     cfg = _probe(path)
     rng = np.random.default_rng(4)
     args = _inputs(rng, 8, frames)
@@ -283,9 +304,9 @@ def test_gradients_reach_trainable_encoder_but_not_frozen_inputs(name):
     assert not np.any(np.asarray(gt))
 
 
-@pytest.mark.parametrize("name", list(CONDITIONS))
+@pytest.mark.parametrize("name", list(ALL_CONDITIONS))
 def test_optimizer_updates_encoder_and_actor(name):
-    path, frames = CONDITIONS[name]
+    path, frames = ALL_CONDITIONS[name]
     cfg = _probe(path)
     rng = np.random.default_rng(5)
     args = _inputs(rng, 16, frames)
@@ -320,9 +341,9 @@ def test_optimizer_updates_encoder_and_actor(name):
         assert any(not np.allclose(a, b) for a, b in zip(before, after, strict=True)), (name, layer)
 
 
-@pytest.mark.parametrize("name", list(CONDITIONS))
+@pytest.mark.parametrize("name", list(ALL_CONDITIONS))
 def test_eval_is_deterministic_and_dropout_only_in_training(name):
-    path, frames = CONDITIONS[name]
+    path, frames = ALL_CONDITIONS[name]
     rng = np.random.default_rng(6)
     args = _inputs(rng, 4, frames)
     model, params, kw = _init(_probe(path), args)
@@ -396,6 +417,28 @@ def test_raw_caches_1_and_5_frames_are_causal_and_aligned(tmp_path):
     expected = ep1[[3, 3, 3, 3, 4], 0].transpose(1, 0, 2).reshape(15, 15)
     np.testing.assert_allclose(t5[row, 0], expected, atol=2e-3)
     assert caches[5][1]["stats"]["replicated_history_queries"] > caches[2][1]["stats"]["replicated_history_queries"]
+
+
+def test_raw_caches_10_and_20_frames_are_causal_and_replicate_segment_start(tmp_path):
+    eps = _episodes()
+    caches = {f: _build(tmp_path, eps, f) for f in (1, 10, 20)}
+    assert len({m["touch_identity"] for _, m in caches.values()}) == 3
+    t1 = np.load(caches[1][0] / "tokens.npy").astype(np.float32)
+    signal = np.clip(eps[0]["observation.tactile"] / 30.0, -1, 1)
+    signal[..., 2] = np.clip(eps[0]["observation.tactile"][..., 2] / 30.0, 0, 1)
+    for f in (10, 20):
+        out, _ = caches[f]
+        tokens = np.load(out / "tokens.npy").astype(np.float32)
+        assert tokens.shape == (16, 4, 15, 3 * f)
+        np.testing.assert_array_equal(tokens[..., -3:], t1)
+        with np.load(out / "keys.npz") as k, np.load(caches[1][0] / "keys.npz") as k1:
+            assert k["segment_id"].tolist() == k1["segment_id"].tolist()
+            assert k["query_frame_index"].tolist() == k1["query_frame_index"].tolist()
+        # Query row 8 of episode 0: rows 0..8, with the missing front replicated from row 0 (oldest->newest).
+        rows = [0] * (f - 9) + list(range(9))
+        expected = signal[rows, 0].transpose(1, 0, 2).reshape(15, 3 * f)
+        np.testing.assert_allclose(tokens[8, 0], expected, atol=2e-3)
+    assert caches[20][1]["stats"]["replicated_history_queries"] >= caches[10][1]["stats"]["replicated_history_queries"]
 
 
 def test_g5_trains_and_evaluates_end_to_end_on_cpu(tmp_path):

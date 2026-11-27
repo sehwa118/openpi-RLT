@@ -1,0 +1,97 @@
+{
+  "backbone_checkpoint": "checkpoints/openpi-assets/checkpoints/pi05_base/params",
+  "data_root": "datasets/3dtacdex_assembly/lerobot_all",
+  "dataset_kind": "3dtacdex_assembly",
+  "feature_extraction": {
+    "batch_size": 32,
+    "num_workers": 2,
+    "prefetch_factor": 2,
+    "prefix_microbatch_size": 1
+  },
+  "model": {
+    "cnn_channels": [
+      32,
+      64,
+      128
+    ],
+    "decoder_layers": 2,
+    "dropout_rate": 0.0,
+    "embed_dim": 512,
+    "geometry_available": false,
+    "history_frames": 3,
+    "input_dim": 2048,
+    "lambda_tactile": 1.0,
+    "lambda_visual": 1.0,
+    "mlp_ratio": 4.0,
+    "mode": "trlt_self_only",
+    "num_cameras": 2,
+    "num_heads": 8,
+    "num_sensors": 8,
+    "num_stages": 2,
+    "num_taxels": 15,
+    "rlt_encoder_layers": 2,
+    "state_dim": 22,
+    "tactile_channels": 3,
+    "tactile_format": "taxels",
+    "tactile_resolution": 1,
+    "use_modality_embedding": false
+  },
+  "probe": {
+    "action_dim": 22,
+    "architecture": "touch_part_attention",
+    "attention_mask_mode": "hierarchical",
+    "batch_size": 256,
+    "depth": 2,
+    "dropout_rate": 0.1,
+    "gradient_clip": 1.0,
+    "hidden_dim": 128,
+    "horizon": 3,
+    "learning_rate": 0.0005,
+    "lr_schedule": "cosine",
+    "max_epochs": 150,
+    "min_lr_ratio": 0.1,
+    "mlp_ratio": 4.0,
+    "num_heads": 4,
+    "patience": 20,
+    "touch_gru_hidden_dim": 32,
+    "touch_kv_mode": "raw_gru",
+    "touch_num_heads": 4,
+    "touch_raw_frames": 20,
+    "touch_use_pos_xyz": true,
+    "variant_tag": "tgru_g20",
+    "warmup_steps": 200,
+    "weight_decay": 0.0001
+  },
+  "protocol_dir": "datasets/3dtacdex_assembly/protocol",
+  "representation": {
+    "batch_size": 64,
+    "gradient_clip": 1.0,
+    "learning_rate": 0.0001,
+    "max_epochs": null,
+    "max_steps": 8000,
+    "microbatch_size": 64,
+    "patience": null,
+    "weight_decay": 0.0001
+  },
+  "split_seed": 42,
+  "tactile_preprocessing": {
+    "mode": "raw_clip",
+    "scale": 30.0
+  },
+  "temporal": {
+    "action_horizon_frames": 3,
+    "fps": 5.0,
+    "max_observation_lag_seconds": 0.3,
+    "query_stride_frames": 1,
+    "tactile_history_frames": 3,
+    "tactile_history_stride_frames": 1,
+    "visual_refresh_frames": 3
+  },
+  "tracking": {
+    "mode": "disabled"
+  },
+  "training_seeds": [
+    0
+  ],
+  "visual_cache": "datasets/3dtacdex_assembly/visual_cache"
+}
