@@ -61,8 +61,14 @@ def variant_name(v: str) -> str:
 def eval_dir(roots: list[Path], seed: int, v: str) -> Path:
     found = [r / f"seed{seed}" / f"eval_{variant_name(v)}" for r in roots]
     found = [d for d in found if (d / "metrics.json").exists()]
-    if len(found) != 1:
-        raise FileNotFoundError(f"{v} seed{seed}: expected exactly one evaluation under {roots}, found {found}")
+    if not found:
+        raise FileNotFoundError(f"{v} seed{seed}: no evaluation under {roots}")
+    # The same checkpoint may be re-evaluated under several roots (e.g. B0): require identical primary metrics.
+    primary = {
+        json.loads((d / "metrics.json").read_text())["metrics"]["primary_normalized_episode_macro_mse"] for d in found
+    }
+    if len(primary) != 1:
+        raise ValueError(f"{v} seed{seed}: evaluations disagree across roots {found}")
     return found[0]
 
 
