@@ -251,6 +251,9 @@ def build_action_probe(config: ProbeConfig) -> nn.Module:
                 num_heads=config.touch_num_heads,
                 use_pos_xyz=config.touch_use_pos_xyz,
                 kv_mode=config.touch_kv_mode,
+                raw_hidden_dim=config.touch_raw_hidden_dim,
+                gru_hidden_dim=config.touch_gru_hidden_dim,
+                raw_frames=config.touch_raw_frames,
             ),
         )
     raise ValueError(f"Unknown probe architecture: {config.architecture}")

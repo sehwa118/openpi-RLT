@@ -13,6 +13,8 @@ from openpi.models.trlt_actor import part_attention_mask
 from openpi.models.trlt_actor import part_specs_for_dim
 from openpi.trlt.config import ProbeConfig
 
+TOUCH_KV_MODES = ("layernorm", "raw_mlp", "raw_gru")
+
 
 @dataclass(frozen=True)
 class TouchCrossAttentionConfig:
@@ -24,15 +26,57 @@ class TouchCrossAttentionConfig:
     num_global_queries: int = 8
     # "layernorm": LN -> Dense on (already normalized) frozen encoder tokens.
     # "raw_mlp": Dense -> GELU -> Dense without LN, for raw taxel vectors whose magnitude carries force.
+    # "raw_gru": per-taxel GRU over the T time-ordered xyz steps of a raw token (C = 3T), zero initial
+    #            state per window, last hidden -> Dense. Weights are shared across taxels and fingers.
     kv_mode: str = "layernorm"
+    # raw_mlp only: width of the first Dense (None = model dim; keeps legacy H3 parameters unchanged).
+    raw_hidden_dim: int | None = None
+    # raw_gru only: GRU hidden width.
+    gru_hidden_dim: int | None = None
+    # raw_* only: expected history frames per raw token (C must equal 3 * raw_frames); None = unchecked.
+    raw_frames: int | None = None
 
     def __post_init__(self):
         if self.num_heads <= 0 or self.num_global_queries <= 0:
             raise ValueError("num_heads and num_global_queries must be positive")
-        if self.kv_mode not in ("layernorm", "raw_mlp"):
-            raise ValueError("kv_mode must be layernorm or raw_mlp")
+        if self.kv_mode not in TOUCH_KV_MODES:
+            raise ValueError(f"kv_mode must be one of {TOUCH_KV_MODES}")
+        if (self.gru_hidden_dim is not None) != (self.kv_mode == "raw_gru"):
+            raise ValueError("gru_hidden_dim is required for, and only valid with, kv_mode=raw_gru")
+        if self.raw_hidden_dim is not None and self.kv_mode != "raw_mlp":
+            raise ValueError("raw_hidden_dim is only valid with kv_mode=raw_mlp")
+        if self.raw_frames is not None and self.kv_mode not in ("raw_mlp", "raw_gru"):
+            raise ValueError("raw_frames is only valid with raw kv modes")
+        for name in ("raw_hidden_dim", "gru_hidden_dim", "raw_frames"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+                raise ValueError(f"{name} must be a positive integer")
         if not math.isfinite(self.dropout_rate) or not (0.0 <= self.dropout_rate < 1.0):
             raise ValueError("dropout_rate must be finite and in [0, 1)")
+
+
+class _RawGRUEncoder(nn.Module):
+    """Shared GRU over time-ordered xyz steps: [N, T, 3] -> last hidden [N, H]; zero state per window."""
+
+    hidden_dim: int
+
+    @nn.compact
+    def __call__(self, steps: jax.Array) -> jax.Array:
+        cell = nn.GRUCell(self.hidden_dim, name="cell")
+        carry = jnp.zeros((steps.shape[0], self.hidden_dim), steps.dtype)
+        for t in range(steps.shape[1]):  # oldest -> newest (raw cache layout); T is static and small
+            carry, _ = cell(carry, steps[:, t])
+        return carry
+
+
+def _raw_gru_tokens(touch: jax.Array, hidden_dim: int, dim: int) -> jax.Array:
+    """Raw tokens [B, F, K, 3T] (per-token xyz blocks ordered oldest->newest) -> kv [B, F, K, dim]."""
+    channels = touch.shape[-1]
+    if channels % 3:
+        raise ValueError(f"raw_gru expects 3*T channels per token, got {channels}")
+    steps = touch.astype(jnp.float32).reshape((-1, channels // 3, 3))
+    last = _RawGRUEncoder(hidden_dim, name="touch_gru")(steps)
+    return nn.Dense(dim, name="touch_proj")(last.reshape((*touch.shape[:-1], hidden_dim)))
 
 
 class PerFingerTouchCrossAttention(nn.Module):
@@ -44,6 +88,9 @@ class PerFingerTouchCrossAttention(nn.Module):
     dropout_rate: float = 0.0
     use_pos_xyz: bool = True
     kv_mode: str = "layernorm"
+    raw_hidden_dim: int | None = None
+    gru_hidden_dim: int | None = None
+    raw_frames: int | None = None
 
     @nn.compact
     def __call__(
@@ -80,14 +127,21 @@ class PerFingerTouchCrossAttention(nn.Module):
         q_norm = nn.LayerNorm(use_scale=False, use_bias=False, name="norm_q")(finger_tokens)
         q_in = q_norm * (1.0 + scale_ca) + shift_ca
 
+        # Only the frozen cache input is stopped; the trainable encoders below receive gradients.
         touch = jax.lax.stop_gradient(touch_tokens)
+        raw_mode = self.kv_mode in ("raw_mlp", "raw_gru")
+        if raw_mode and self.raw_frames is not None and touch.shape[-1] != 3 * self.raw_frames:
+            raise ValueError(f"raw tokens have {touch.shape[-1]} channels; expected 3 * raw_frames={self.raw_frames}")
         if self.kv_mode == "raw_mlp":
-            hidden = nn.gelu(nn.Dense(self.dim, name="touch_raw_fc1")(touch.astype(jnp.float32)), approximate=False)
+            width = self.raw_hidden_dim or self.dim
+            hidden = nn.gelu(nn.Dense(width, name="touch_raw_fc1")(touch.astype(jnp.float32)), approximate=False)
             kv = nn.Dense(self.dim, name="touch_proj")(hidden)
+        elif self.kv_mode == "raw_gru":
+            kv = _raw_gru_tokens(touch, self.gru_hidden_dim, self.dim)
         elif self.kv_mode == "layernorm":
             kv = nn.Dense(self.dim, name="touch_proj")(nn.LayerNorm(name="norm_kv")(touch.astype(jnp.float32)))
         else:
-            raise ValueError("kv_mode must be layernorm or raw_mlp")
+            raise ValueError(f"kv_mode must be one of {TOUCH_KV_MODES}")
         if self.use_pos_xyz and touch_pos_xyz is not None:
             pos = jnp.asarray(jax.lax.stop_gradient(touch_pos_xyz), dtype=kv.dtype)
             if pos.ndim == 3:
@@ -232,6 +286,9 @@ class TouchPartAttentionActionProbe(nn.Module):
                 dropout_rate=touch_dropout,
                 use_pos_xyz=self.touch_config.use_pos_xyz,
                 kv_mode=self.touch_config.kv_mode,
+                raw_hidden_dim=self.touch_config.raw_hidden_dim,
+                gru_hidden_dim=self.touch_config.gru_hidden_dim,
+                raw_frames=self.touch_config.raw_frames,
                 name=f"touch_ca_{index}",
             )(x, cond, touch_tokens, touch_valid_mask, touch_pos_xyz=touch_pos_xyz, train=train)
 

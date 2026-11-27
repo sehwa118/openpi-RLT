@@ -19,7 +19,7 @@ SENSORS = tuple(
 )
 MODELS = ("rlt_original", "trlt_self_only", "trlt_cross_only", "trlt_alternating")
 PROBE_ARCHITECTURES = ("mlp", "resmlp", "part_attention", "touch_part_attention")
-PROBE_TOUCH_KV_MODES = ("layernorm", "raw_mlp")
+PROBE_TOUCH_KV_MODES = ("layernorm", "raw_mlp", "raw_gru")
 PROBE_ATTENTION_MASK_MODES = ("full", "kinematic", "hierarchical")
 PROBE_LR_SCHEDULES = ("constant", "cosine")
 SCHEMA_VERSION = 1
@@ -182,7 +182,11 @@ class ProbeConfig:
     # touch_part_attention only: per-finger cross-attention over frozen tactile tokens.
     touch_num_heads: int = 4
     touch_use_pos_xyz: bool = True
-    touch_kv_mode: Literal["layernorm", "raw_mlp"] = "layernorm"
+    touch_kv_mode: Literal["layernorm", "raw_mlp", "raw_gru"] = "layernorm"
+    # Optional raw-token encoder settings (omitted from identity when None, so H1-H3 stay unchanged).
+    touch_raw_hidden_dim: int | None = None  # raw_mlp first-layer width (None = hidden_dim)
+    touch_gru_hidden_dim: int | None = None  # raw_gru hidden width (required for raw_gru)
+    touch_raw_frames: int | None = None  # raw_*: required history frames per token (C = 3 * frames)
 
     def __post_init__(self):
         if min(self.hidden_dim, self.depth, self.action_dim, self.horizon, self.batch_size) <= 0:
@@ -219,6 +223,21 @@ class ProbeConfig:
                 raise ValueError(f"Unknown touch_kv_mode: {self.touch_kv_mode}")
             if not isinstance(self.touch_use_pos_xyz, bool):
                 raise ValueError("touch_use_pos_xyz must be boolean")
+            if (self.touch_gru_hidden_dim is not None) != (self.touch_kv_mode == "raw_gru"):
+                raise ValueError("touch_gru_hidden_dim is required for, and only valid with, touch_kv_mode=raw_gru")
+            if self.touch_raw_hidden_dim is not None and self.touch_kv_mode != "raw_mlp":
+                raise ValueError("touch_raw_hidden_dim is only valid with touch_kv_mode=raw_mlp")
+            if self.touch_raw_frames is not None and self.touch_kv_mode not in ("raw_mlp", "raw_gru"):
+                raise ValueError("touch_raw_frames is only valid with raw touch_kv_modes")
+            for name in ("touch_raw_hidden_dim", "touch_gru_hidden_dim", "touch_raw_frames"):
+                value = getattr(self, name)
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+                    raise ValueError(f"{name} must be a positive integer")
+        elif any(
+            getattr(self, name) is not None
+            for name in ("touch_raw_hidden_dim", "touch_gru_hidden_dim", "touch_raw_frames")
+        ):
+            raise ValueError("touch_* raw encoder settings require architecture=touch_part_attention")
         if self.variant_tag is not None and (
             not isinstance(self.variant_tag, str)
             or "__" in self.variant_tag
@@ -287,6 +306,9 @@ def probe_config_dict(config: ProbeConfig) -> dict:
         value.pop("variant_tag")
     if config.architecture != "touch_part_attention":
         for key in ("touch_num_heads", "touch_use_pos_xyz", "touch_kv_mode"):
+            value.pop(key)
+    for key in ("touch_raw_hidden_dim", "touch_gru_hidden_dim", "touch_raw_frames"):
+        if value[key] is None:
             value.pop(key)
     return value
 
